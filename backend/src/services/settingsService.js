@@ -8,16 +8,25 @@ const DEFAULT_SETTINGS = {
       label: "Breakfast",
       allowedMinutes: 30,
       enabled: true,
+      startTime: "08:30",
+      endTime: "10:30",
+      onePerDay: true,
     },
     lunch: {
       label: "Lunch",
       allowedMinutes: 60,
       enabled: true,
+      startTime: "12:00",
+      endTime: "14:30",
+      onePerDay: true,
     },
     tea: {
       label: "Tea",
       allowedMinutes: 15,
       enabled: true,
+      startTime: "16:00",
+      endTime: "17:30",
+      onePerDay: true,
     },
   },
 
@@ -62,6 +71,14 @@ const deepMerge = (target, source) => {
   return output;
 };
 
+const cleanMongooseFields = (object) => {
+  delete object._id;
+  delete object.__v;
+  delete object.createdAt;
+  delete object.updatedAt;
+  return object;
+};
+
 const getSystemSettings = async () => {
   let settings = await SystemSetting.findOne({ key: "main" });
 
@@ -75,14 +92,11 @@ const getSystemSettings = async () => {
 const updateSystemSettings = async (updates) => {
   const currentSettings = await getSystemSettings();
 
-  const currentObject = currentSettings.toObject();
+  const currentObject = cleanMongooseFields(currentSettings.toObject());
 
-  delete currentObject._id;
-  delete currentObject.__v;
-  delete currentObject.createdAt;
-  delete currentObject.updatedAt;
+  const currentWithDefaults = deepMerge(DEFAULT_SETTINGS, currentObject);
 
-  const mergedSettings = deepMerge(currentObject, updates);
+  const mergedSettings = deepMerge(currentWithDefaults, updates);
 
   mergedSettings.key = "main";
 
@@ -110,22 +124,14 @@ const resetSystemSettings = async () => {
 const getBreakRulesFromSettings = async () => {
   const settings = await getSystemSettings();
 
+  const settingsObject = settings.toObject();
+
+  const merged = deepMerge(DEFAULT_SETTINGS, settingsObject);
+
   return {
-    breakfast: {
-      label: settings.breaks.breakfast.label,
-      allowedMinutes: settings.breaks.breakfast.allowedMinutes,
-      enabled: settings.breaks.breakfast.enabled,
-    },
-    lunch: {
-      label: settings.breaks.lunch.label,
-      allowedMinutes: settings.breaks.lunch.allowedMinutes,
-      enabled: settings.breaks.lunch.enabled,
-    },
-    tea: {
-      label: settings.breaks.tea.label,
-      allowedMinutes: settings.breaks.tea.allowedMinutes,
-      enabled: settings.breaks.tea.enabled,
-    },
+    breakfast: merged.breaks.breakfast,
+    lunch: merged.breaks.lunch,
+    tea: merged.breaks.tea,
   };
 };
 

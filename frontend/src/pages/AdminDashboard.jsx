@@ -7,7 +7,10 @@ import {
   Settings,
   UserCircle,
   Users,
+  Coffee
 } from "lucide-react";
+
+import AdminBreakReport from "../components/AdminBreakReport";
 
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
@@ -53,6 +56,11 @@ const AdminDashboard = () => {
       icon: Users,
     },
     {
+      key: "breaks",
+      label: "Break Report",
+      icon: Coffee,
+    },
+    {
       key: "settings",
       label: "Settings",
       icon: Settings,
@@ -92,6 +100,10 @@ const AdminDashboard = () => {
     if (activeSection === "profile") {
       return <ProfilePanel />;
     }
+
+    if (activeSection === "breaks") {
+    return <AdminBreakReport />;
+  }
 
     return <DailyAttendanceReport />;
   };

@@ -2,9 +2,12 @@ import { useState } from "react";
 import {
   Bell,
   ClipboardList,
+  Coffee,
   LayoutDashboard,
   UserCircle,
 } from "lucide-react";
+
+import AdminBreakReport from "../components/AdminBreakReport";
 
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
@@ -37,6 +40,11 @@ const ManagerDashboard = () => {
       icon: Bell,
     },
     {
+      key: "breaks",
+      label: "Break Report",
+      icon: Coffee,
+    },
+    {
       key: "profile",
       label: "Profile",
       icon: UserCircle,
@@ -58,6 +66,10 @@ const ManagerDashboard = () => {
 
     if (activeSection === "profile") {
       return <ProfilePanel />;
+    }
+
+    if (activeSection === "breaks") {
+      return <AdminBreakReport />;
     }
 
     return <DailyAttendanceReport />;

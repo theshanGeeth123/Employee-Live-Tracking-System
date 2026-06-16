@@ -4,6 +4,7 @@ const {
   endBreak,
   getMyTodayBreaks,
   getTodayAllBreaks,
+   getBreaksByDate,
 } = require("../services/breakService");
 
 const { formatSecondsToTime } = require("../utils/dateHelper");
@@ -209,7 +210,9 @@ const getMyBreaksToday = async (req, res) => {
 // @access  Admin / Manager
 const getTodayBreaks = async (req, res) => {
   try {
-    const breaks = await getTodayAllBreaks();
+    const { date } = req.query;
+
+    const breaks = await getBreaksByDate(date);
 
     const formattedBreaks = breaks.map((item) => ({
       ...item.toObject(),
@@ -219,13 +222,14 @@ const getTodayBreaks = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      date: date || "today",
       count: formattedBreaks.length,
       breaks: formattedBreaks,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: "Failed to get today breaks",
+      message: "Failed to get breaks",
       error: error.message,
     });
   }

@@ -16,6 +16,20 @@ const breakSettingSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    startTime: {
+      type: String,
+      required: true,
+      match: [/^\d{2}:\d{2}$/, "Start time must be HH:mm"],
+    },
+    endTime: {
+      type: String,
+      required: true,
+      match: [/^\d{2}:\d{2}$/, "End time must be HH:mm"],
+    },
+    onePerDay: {
+      type: Boolean,
+      default: true,
+    },
   },
   { _id: false }
 );
@@ -35,6 +49,9 @@ const systemSettingSchema = new mongoose.Schema(
           label: "Breakfast",
           allowedMinutes: 30,
           enabled: true,
+          startTime: "08:30",
+          endTime: "10:30",
+          onePerDay: true,
         },
       },
       lunch: {
@@ -43,6 +60,9 @@ const systemSettingSchema = new mongoose.Schema(
           label: "Lunch",
           allowedMinutes: 60,
           enabled: true,
+          startTime: "12:00",
+          endTime: "14:30",
+          onePerDay: true,
         },
       },
       tea: {
@@ -51,6 +71,9 @@ const systemSettingSchema = new mongoose.Schema(
           label: "Tea",
           allowedMinutes: 15,
           enabled: true,
+          startTime: "16:00",
+          endTime: "17:30",
+          onePerDay: true,
         },
       },
     },

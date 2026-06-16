@@ -8,16 +8,25 @@ const defaultForm = {
       label: "Breakfast",
       allowedMinutes: 30,
       enabled: true,
+      startTime: "08:30",
+      endTime: "10:30",
+      onePerDay: true,
     },
     lunch: {
       label: "Lunch",
       allowedMinutes: 60,
       enabled: true,
+      startTime: "12:00",
+      endTime: "14:30",
+      onePerDay: true,
     },
     tea: {
       label: "Tea",
       allowedMinutes: 15,
       enabled: true,
+      startTime: "16:00",
+      endTime: "17:30",
+      onePerDay: true,
     },
   },
   presence: {
@@ -49,34 +58,42 @@ const SettingsPanel = () => {
       setError("");
 
       const response = await API.get("/settings");
-
-      const settings = response.data.settings;
+      const settings = response.data.settings || {};
 
       setFormData({
         breaks: {
           breakfast: {
             label: settings.breaks?.breakfast?.label || "Breakfast",
             allowedMinutes:
-              settings.breaks?.breakfast?.allowedMinutes || 30,
+              settings.breaks?.breakfast?.allowedMinutes ?? 30,
             enabled: settings.breaks?.breakfast?.enabled ?? true,
+            startTime: settings.breaks?.breakfast?.startTime || "08:30",
+            endTime: settings.breaks?.breakfast?.endTime || "10:30",
+            onePerDay: settings.breaks?.breakfast?.onePerDay ?? true,
           },
           lunch: {
             label: settings.breaks?.lunch?.label || "Lunch",
-            allowedMinutes: settings.breaks?.lunch?.allowedMinutes || 60,
+            allowedMinutes: settings.breaks?.lunch?.allowedMinutes ?? 60,
             enabled: settings.breaks?.lunch?.enabled ?? true,
+            startTime: settings.breaks?.lunch?.startTime || "12:00",
+            endTime: settings.breaks?.lunch?.endTime || "14:30",
+            onePerDay: settings.breaks?.lunch?.onePerDay ?? true,
           },
           tea: {
             label: settings.breaks?.tea?.label || "Tea",
-            allowedMinutes: settings.breaks?.tea?.allowedMinutes || 15,
+            allowedMinutes: settings.breaks?.tea?.allowedMinutes ?? 15,
             enabled: settings.breaks?.tea?.enabled ?? true,
+            startTime: settings.breaks?.tea?.startTime || "16:00",
+            endTime: settings.breaks?.tea?.endTime || "17:30",
+            onePerDay: settings.breaks?.tea?.onePerDay ?? true,
           },
         },
         presence: {
           offlineGraceSeconds:
-            settings.presence?.offlineGraceSeconds || 10,
+            settings.presence?.offlineGraceSeconds ?? 10,
           heartbeatIntervalSeconds:
-            settings.presence?.heartbeatIntervalSeconds || 20,
-          idleTimeoutMinutes: settings.presence?.idleTimeoutMinutes || 10,
+            settings.presence?.heartbeatIntervalSeconds ?? 20,
+          idleTimeoutMinutes: settings.presence?.idleTimeoutMinutes ?? 10,
         },
         office: {
           timezone: settings.office?.timezone || "Asia/Colombo",
@@ -154,8 +171,33 @@ const SettingsPanel = () => {
     }));
   };
 
+  const validateBreakTimes = () => {
+    const breakTypes = ["breakfast", "lunch", "tea"];
+
+    for (const breakType of breakTypes) {
+      const item = formData.breaks[breakType];
+
+      if (!item.startTime || !item.endTime) {
+        return `${item.label} start time and end time are required`;
+      }
+
+      if (!item.allowedMinutes || Number(item.allowedMinutes) < 1) {
+        return `${item.label} allowed minutes must be at least 1`;
+      }
+    }
+
+    return null;
+  };
+
   const saveSettings = async (e) => {
     e.preventDefault();
+
+    const validationError = validateBreakTimes();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
 
     try {
       setSaving(true);
@@ -168,16 +210,25 @@ const SettingsPanel = () => {
             label: formData.breaks.breakfast.label,
             allowedMinutes: Number(formData.breaks.breakfast.allowedMinutes),
             enabled: Boolean(formData.breaks.breakfast.enabled),
+            startTime: formData.breaks.breakfast.startTime,
+            endTime: formData.breaks.breakfast.endTime,
+            onePerDay: Boolean(formData.breaks.breakfast.onePerDay),
           },
           lunch: {
             label: formData.breaks.lunch.label,
             allowedMinutes: Number(formData.breaks.lunch.allowedMinutes),
             enabled: Boolean(formData.breaks.lunch.enabled),
+            startTime: formData.breaks.lunch.startTime,
+            endTime: formData.breaks.lunch.endTime,
+            onePerDay: Boolean(formData.breaks.lunch.onePerDay),
           },
           tea: {
             label: formData.breaks.tea.label,
             allowedMinutes: Number(formData.breaks.tea.allowedMinutes),
             enabled: Boolean(formData.breaks.tea.enabled),
+            startTime: formData.breaks.tea.startTime,
+            endTime: formData.breaks.tea.endTime,
+            onePerDay: Boolean(formData.breaks.tea.onePerDay),
           },
         },
         presence: {
@@ -204,7 +255,7 @@ const SettingsPanel = () => {
       const response = await API.put("/settings", payload);
 
       setMessage(response.data.message || "Settings updated successfully");
-      fetchSettings();
+      await fetchSettings();
     } catch (error) {
       setError(error.response?.data?.message || "Failed to update settings");
     } finally {
@@ -227,7 +278,7 @@ const SettingsPanel = () => {
       const response = await API.post("/settings/reset");
 
       setMessage(response.data.message || "Settings reset successfully");
-      fetchSettings();
+      await fetchSettings();
     } catch (error) {
       setError(error.response?.data?.message || "Failed to reset settings");
     } finally {
@@ -255,7 +306,8 @@ const SettingsPanel = () => {
           </div>
 
           <p className="mt-1 text-sm text-slate-500">
-            Manage break rules, presence timeout and office time
+            Manage break rules, allowed time windows, presence timeout and
+            office time
           </p>
         </div>
 
@@ -337,6 +389,49 @@ const SettingsPanel = () => {
                   className="mb-3 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
                   required
                 />
+
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Start Time
+                </label>
+
+                <input
+                  type="time"
+                  value={formData.breaks[breakType].startTime}
+                  onChange={(e) =>
+                    handleBreakChange(breakType, "startTime", e.target.value)
+                  }
+                  className="mb-3 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
+                  required
+                />
+
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  End Time
+                </label>
+
+                <input
+                  type="time"
+                  value={formData.breaks[breakType].endTime}
+                  onChange={(e) =>
+                    handleBreakChange(breakType, "endTime", e.target.value)
+                  }
+                  className="mb-3 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
+                  required
+                />
+
+                <label className="mb-2 flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={formData.breaks[breakType].onePerDay}
+                    onChange={(e) =>
+                      handleBreakChange(
+                        breakType,
+                        "onePerDay",
+                        e.target.checked
+                      )
+                    }
+                  />
+                  One time per day
+                </label>
 
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
@@ -461,7 +556,7 @@ const SettingsPanel = () => {
 
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">
-                Start Time
+                Office Start Time
               </label>
 
               <input
@@ -477,7 +572,7 @@ const SettingsPanel = () => {
 
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">
-                End Time
+                Office End Time
               </label>
 
               <input

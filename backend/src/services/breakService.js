@@ -7,12 +7,48 @@ const {
   getDurationInSeconds,
 } = require("../utils/dateHelper");
 
-const { getBreakRulesFromSettings } = require("./settingsService");
+const {
+  getBreakRulesFromSettings,
+  getSystemSettings,
+} = require("./settingsService");
 
 const throwError = (message, statusCode = 400) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   throw error;
+};
+
+const timeToMinutes = (timeString) => {
+  const [hours, minutes] = timeString.split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
+const getTimeStringInTimeZone = (date, timeZone = "Asia/Colombo") => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+
+  return `${hour}:${minute}`;
+};
+
+const isTimeWithinWindow = ({ now, startTime, endTime, timeZone }) => {
+  const currentTime = getTimeStringInTimeZone(now, timeZone);
+
+  const currentMinutes = timeToMinutes(currentTime);
+  const startMinutes = timeToMinutes(startTime);
+  const endMinutes = timeToMinutes(endTime);
+
+  if (startMinutes <= endMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  }
+
+  return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 };
 
 const getBreakRules = async () => {
@@ -27,6 +63,9 @@ const getBreakRule = async (breakType) => {
 const startBreak = async ({ employeeId, breakType, now = new Date() }) => {
   const today = getSriLankaDateString(now);
 
+  const settings = await getSystemSettings();
+  const timeZone = settings.office?.timezone || "Asia/Colombo";
+
   const rule = await getBreakRule(breakType);
 
   if (!rule) {
@@ -34,7 +73,21 @@ const startBreak = async ({ employeeId, breakType, now = new Date() }) => {
   }
 
   if (!rule.enabled) {
-    throwError("This break type is disabled by admin", 400);
+    throwError(`${rule.label} break is disabled by admin`, 400);
+  }
+
+  const withinAllowedTime = isTimeWithinWindow({
+    now,
+    startTime: rule.startTime,
+    endTime: rule.endTime,
+    timeZone,
+  });
+
+  if (!withinAllowedTime) {
+    throwError(
+      `${rule.label} break can be started only between ${rule.startTime} and ${rule.endTime}`,
+      400
+    );
   }
 
   const dailySession = await DailyWorkSession.findOne({
@@ -61,7 +114,19 @@ const startBreak = async ({ employeeId, breakType, now = new Date() }) => {
   });
 
   if (openBreak) {
-    throwError("You already have an active break", 400);
+    throwError("You already have an active break. Please end it first.", 400);
+  }
+
+  if (rule.onePerDay) {
+    const alreadyTakenBreak = await BreakLog.findOne({
+      employee: employeeId,
+      date: today,
+      breakType,
+    });
+
+    if (alreadyTakenBreak) {
+      throwError(`${rule.label} break can be used only once per day`, 400);
+    }
   }
 
   const breakLog = await BreakLog.create({
@@ -167,14 +232,14 @@ const getMyTodayBreaks = async (employeeId) => {
   }).sort({ createdAt: -1 });
 };
 
-const getTodayAllBreaks = async () => {
-  const today = getSriLankaDateString();
+const getBreaksByDate = async (date) => {
+  const selectedDate = date || getSriLankaDateString();
 
   return await BreakLog.find({
-    date: today,
+    date: selectedDate,
   })
     .populate("employee", "name email role department position presenceStatus")
-    .sort({ createdAt: -1 });
+    .sort({ startTime: -1 });
 };
 
 module.exports = {
@@ -182,5 +247,5 @@ module.exports = {
   startBreak,
   endBreak,
   getMyTodayBreaks,
-  getTodayAllBreaks,
+  getBreaksByDate,
 };
