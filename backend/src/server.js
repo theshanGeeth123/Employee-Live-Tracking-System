@@ -20,6 +20,7 @@ const breakRoutes = require("./routes/breakRoutes");
 const leaveRoutes = require("./routes/leaveRoutes");
 const attendanceSummaryRoutes = require("./routes/attendanceSummaryRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const settingsRoutes = require("./routes/settingsRoutes");
 
 const setupPresenceSocket = require("./socket/presenceSocket");
 
@@ -83,6 +84,7 @@ app.use("/api/breaks", breakRoutes);
 app.use("/api/leaves", leaveRoutes);
 app.use("/api/attendance-summary", attendanceSummaryRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // 404 route
 app.use((req, res) => {

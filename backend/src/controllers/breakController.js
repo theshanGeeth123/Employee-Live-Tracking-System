@@ -1,5 +1,5 @@
 const {
-  BREAK_RULES,
+  getBreakRules: getBreakRulesFromService,
   startBreak,
   endBreak,
   getMyTodayBreaks,
@@ -33,10 +33,20 @@ const sanitizeUser = (user) => {
 // @route   GET /api/breaks/rules
 // @access  Private
 const getBreakRules = async (req, res) => {
-  res.status(200).json({
-    success: true,
-    rules: BREAK_RULES,
-  });
+  try {
+    const rules = await getBreakRulesFromService();
+
+    res.status(200).json({
+      success: true,
+      rules,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to get break rules",
+      error: error.message,
+    });
+  }
 };
 
 // @desc    Start break
