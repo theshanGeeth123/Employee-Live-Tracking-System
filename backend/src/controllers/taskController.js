@@ -12,6 +12,11 @@ const getCurrentUserId = (req) => {
   return req.user?._id || req.user?.id || req.user?.userId;
 };
 
+const getIdString = (value) => {
+  if (!value) return "";
+  return String(value._id || value.id || value);
+};
+
 const getUserName = (user) => {
   if (!user) return "Unknown User";
 
@@ -36,14 +41,50 @@ const emitSocketEvent = (req, eventName, payload) => {
   if (io) io.emit(eventName, payload);
 };
 
+const normalizeAssignedTo = (assignedTo) => {
+  if (!assignedTo) return [];
+
+  const rawList = Array.isArray(assignedTo) ? assignedTo : [assignedTo];
+
+  const cleaned = rawList
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  return [...new Set(cleaned)];
+};
+
+const userIsAssignedToTask = (task, userId) => {
+  const currentUserId = String(userId);
+
+  const assignedList = Array.isArray(task.assignedTo)
+    ? task.assignedTo
+    : task.assignedTo
+    ? [task.assignedTo]
+    : [];
+
+  return assignedList.some((item) => getIdString(item) === currentUserId);
+};
+
 const populateTask = (query) => {
   return query
-    .populate("assignedTo", "name fullName firstName lastName username email role")
-    .populate("assignedBy", "name fullName firstName lastName username email role");
+    .populate(
+      "assignedTo",
+      "name fullName firstName lastName username email role status isActive"
+    )
+    .populate(
+      "assignedBy",
+      "name fullName firstName lastName username email role"
+    );
 };
 
 const formatTask = (task) => {
   if (!task) return null;
+
+  const assignedTo = Array.isArray(task.assignedTo)
+    ? task.assignedTo
+    : task.assignedTo
+    ? [task.assignedTo]
+    : [];
 
   return {
     _id: task._id,
@@ -56,7 +97,8 @@ const formatTask = (task) => {
     completedAt: task.completedAt,
     cancelledAt: task.cancelledAt,
     completionRemark: task.completionRemark,
-    assignedTo: task.assignedTo,
+    assignedTo,
+    assignedToCount: assignedTo.length,
     assignedBy: task.assignedBy,
     notes: task.notes || [],
     statusHistory: task.statusHistory || [],
@@ -65,20 +107,90 @@ const formatTask = (task) => {
   };
 };
 
+const validateAssignedUsers = async (assignedToIds) => {
+  if (!assignedToIds.length) {
+    return {
+      valid: false,
+      message: "Please select at least one employee",
+      users: [],
+    };
+  }
+
+  const users = await User.find({
+    _id: { $in: assignedToIds },
+  }).select("name fullName firstName lastName username email role status isActive");
+
+  if (users.length !== assignedToIds.length) {
+    return {
+      valid: false,
+      message: "One or more selected users were not found",
+      users,
+    };
+  }
+
+  const invalidUser = users.find(
+    (user) => !["employee", "manager"].includes(user.role)
+  );
+
+  if (invalidUser) {
+    return {
+      valid: false,
+      message: "Tasks can be assigned only to employees or managers",
+      users,
+    };
+  }
+
+  return {
+    valid: true,
+    message: "",
+    users,
+  };
+};
+
+// @desc    Get assignable users with search and role filter
+// @route   GET /api/tasks/assignable-users?search=&role=all
+// @access  Admin, Manager
 exports.getAssignableUsers = async (req, res) => {
   try {
     if (!isAdminOrManager(req.user)) {
       return sendError(res, 403, "Access denied");
     }
 
-    const users = await User.find({
+    const { search = "", role = "all" } = req.query;
+
+    const filter = {
       role: { $in: ["employee", "manager"] },
-    })
+    };
+
+    if (role && role !== "all") {
+      if (!["employee", "manager"].includes(role)) {
+        return sendError(res, 400, "Invalid role filter");
+      }
+
+      filter.role = role;
+    }
+
+    if (search.trim()) {
+      const regex = new RegExp(search.trim(), "i");
+
+      filter.$or = [
+        { name: regex },
+        { fullName: regex },
+        { firstName: regex },
+        { lastName: regex },
+        { username: regex },
+        { email: regex },
+        { role: regex },
+      ];
+    }
+
+    const users = await User.find(filter)
       .select("name fullName firstName lastName username email role status isActive")
-      .sort({ name: 1, email: 1 });
+      .sort({ role: 1, name: 1, email: 1 });
 
     return res.status(200).json({
       success: true,
+      count: users.length,
       users,
     });
   } catch (error) {
@@ -87,6 +199,9 @@ exports.getAssignableUsers = async (req, res) => {
   }
 };
 
+// @desc    Create task and assign to one or many users
+// @route   POST /api/tasks
+// @access  Admin, Manager
 exports.createTask = async (req, res) => {
   try {
     if (!isAdminOrManager(req.user)) {
@@ -94,24 +209,17 @@ exports.createTask = async (req, res) => {
     }
 
     const currentUserId = getCurrentUserId(req);
-    const { title, description, priority, dueDate, assignedTo } = req.body;
+    const { title, description, priority, dueDate } = req.body;
+    const assignedToIds = normalizeAssignedTo(req.body.assignedTo);
 
     if (!title || !title.trim()) {
       return sendError(res, 400, "Task title is required");
     }
 
-    if (!assignedTo) {
-      return sendError(res, 400, "Assigned employee is required");
-    }
+    const validation = await validateAssignedUsers(assignedToIds);
 
-    const assignedUser = await User.findById(assignedTo);
-
-    if (!assignedUser) {
-      return sendError(res, 404, "Assigned user not found");
-    }
-
-    if (!["employee", "manager"].includes(assignedUser.role)) {
-      return sendError(res, 400, "Task can be assigned only to employee or manager");
+    if (!validation.valid) {
+      return sendError(res, 400, validation.message);
     }
 
     const task = await Task.create({
@@ -119,7 +227,7 @@ exports.createTask = async (req, res) => {
       description: description?.trim() || "",
       priority: priority || "medium",
       dueDate: dueDate || null,
-      assignedTo,
+      assignedTo: assignedToIds,
       assignedBy: currentUserId,
       status: "pending",
       statusHistory: [
@@ -147,6 +255,9 @@ exports.createTask = async (req, res) => {
   }
 };
 
+// @desc    Get all tasks for admin/manager
+// @route   GET /api/tasks/admin?status=all&assignedTo=all
+// @access  Admin, Manager
 exports.getAdminTasks = async (req, res) => {
   try {
     if (!isAdminOrManager(req.user)) {
@@ -165,9 +276,7 @@ exports.getAdminTasks = async (req, res) => {
       filter.assignedTo = assignedTo;
     }
 
-    const tasks = await populateTask(
-      Task.find(filter).sort({ createdAt: -1 })
-    );
+    const tasks = await populateTask(Task.find(filter).sort({ createdAt: -1 }));
 
     return res.status(200).json({
       success: true,
@@ -180,6 +289,9 @@ exports.getAdminTasks = async (req, res) => {
   }
 };
 
+// @desc    Get logged-in user assigned tasks
+// @route   GET /api/tasks/my?status=all
+// @access  Admin, Manager, Employee
 exports.getMyTasks = async (req, res) => {
   try {
     const currentUserId = getCurrentUserId(req);
@@ -193,9 +305,7 @@ exports.getMyTasks = async (req, res) => {
       filter.status = status;
     }
 
-    const tasks = await populateTask(
-      Task.find(filter).sort({ createdAt: -1 })
-    );
+    const tasks = await populateTask(Task.find(filter).sort({ createdAt: -1 }));
 
     return res.status(200).json({
       success: true,
@@ -208,6 +318,9 @@ exports.getMyTasks = async (req, res) => {
   }
 };
 
+// @desc    Get task by id
+// @route   GET /api/tasks/:id
+// @access  Admin, Manager, Assigned Employee
 exports.getTaskById = async (req, res) => {
   try {
     const task = await populateTask(Task.findById(req.params.id));
@@ -216,10 +329,9 @@ exports.getTaskById = async (req, res) => {
       return sendError(res, 404, "Task not found");
     }
 
-    const currentUserId = String(getCurrentUserId(req));
-    const assignedToId = String(task.assignedTo?._id || task.assignedTo);
+    const currentUserId = getCurrentUserId(req);
 
-    if (!isAdminOrManager(req.user) && currentUserId !== assignedToId) {
+    if (!isAdminOrManager(req.user) && !userIsAssignedToTask(task, currentUserId)) {
       return sendError(res, 403, "Access denied");
     }
 
@@ -233,6 +345,95 @@ exports.getTaskById = async (req, res) => {
   }
 };
 
+// @desc    Admin update task details
+// @route   PATCH /api/tasks/:id
+// @access  Admin
+exports.updateTask = async (req, res) => {
+  try {
+    if (req.user?.role !== "admin") {
+      return sendError(res, 403, "Only admin can edit tasks");
+    }
+
+    const task = await Task.findById(req.params.id);
+
+    if (!task) {
+      return sendError(res, 404, "Task not found");
+    }
+
+    if (["completed", "cancelled"].includes(task.status)) {
+      return sendError(res, 400, "Completed or cancelled tasks cannot be edited");
+    }
+
+    const { title, description, priority, dueDate } = req.body;
+    const assignedToIds = normalizeAssignedTo(req.body.assignedTo);
+
+    if (!title || !title.trim()) {
+      return sendError(res, 400, "Task title is required");
+    }
+
+    const validation = await validateAssignedUsers(assignedToIds);
+
+    if (!validation.valid) {
+      return sendError(res, 400, validation.message);
+    }
+
+    task.title = title.trim();
+    task.description = description?.trim() || "";
+    task.priority = priority || "medium";
+    task.dueDate = dueDate || null;
+    task.assignedTo = assignedToIds;
+
+    await task.save();
+
+    const updatedTask = await populateTask(Task.findById(task._id));
+
+    emitSocketEvent(req, "taskUpdated", formatTask(updatedTask));
+
+    return res.status(200).json({
+      success: true,
+      message: "Task updated successfully",
+      task: formatTask(updatedTask),
+    });
+  } catch (error) {
+    console.error("Update task error:", error);
+    return sendError(res, 500, "Failed to update task");
+  }
+};
+
+// @desc    Admin delete task
+// @route   DELETE /api/tasks/:id
+// @access  Admin
+exports.deleteTask = async (req, res) => {
+  try {
+    if (req.user?.role !== "admin") {
+      return sendError(res, 403, "Only admin can remove tasks");
+    }
+
+    const task = await Task.findById(req.params.id);
+
+    if (!task) {
+      return sendError(res, 404, "Task not found");
+    }
+
+    const taskId = task._id;
+
+    await Task.findByIdAndDelete(taskId);
+
+    emitSocketEvent(req, "taskDeleted", {
+      _id: taskId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Task removed successfully",
+      deletedTaskId: taskId,
+    });
+  } catch (error) {
+    console.error("Delete task error:", error);
+    return sendError(res, 500, "Failed to remove task");
+  }
+};
+
 const updateTaskStatus = async (req, res, newStatus) => {
   try {
     const task = await Task.findById(req.params.id);
@@ -241,10 +442,9 @@ const updateTaskStatus = async (req, res, newStatus) => {
       return sendError(res, 404, "Task not found");
     }
 
-    const currentUserId = String(getCurrentUserId(req));
-    const assignedToId = String(task.assignedTo);
+    const currentUserId = getCurrentUserId(req);
 
-    if (!isAdminOrManager(req.user) && currentUserId !== assignedToId) {
+    if (!isAdminOrManager(req.user) && !userIsAssignedToTask(task, currentUserId)) {
       return sendError(res, 403, "Access denied");
     }
 
@@ -279,7 +479,7 @@ const updateTaskStatus = async (req, res, newStatus) => {
 
     task.statusHistory.push({
       status: newStatus,
-      changedBy: getCurrentUserId(req),
+      changedBy: currentUserId,
       changedByName: getUserName(req.user),
       changedAt: now,
     });
@@ -307,6 +507,9 @@ exports.completeTask = (req, res) => updateTaskStatus(req, res, "completed");
 
 exports.cancelTask = (req, res) => updateTaskStatus(req, res, "cancelled");
 
+// @desc    Add task note
+// @route   POST /api/tasks/:id/notes
+// @access  Admin, Manager, Assigned Employee
 exports.addTaskNote = async (req, res) => {
   try {
     const { note } = req.body;
@@ -321,15 +524,14 @@ exports.addTaskNote = async (req, res) => {
       return sendError(res, 404, "Task not found");
     }
 
-    const currentUserId = String(getCurrentUserId(req));
-    const assignedToId = String(task.assignedTo);
+    const currentUserId = getCurrentUserId(req);
 
-    if (!isAdminOrManager(req.user) && currentUserId !== assignedToId) {
+    if (!isAdminOrManager(req.user) && !userIsAssignedToTask(task, currentUserId)) {
       return sendError(res, 403, "Access denied");
     }
 
     task.notes.push({
-      user: getCurrentUserId(req),
+      user: currentUserId,
       name: getUserName(req.user),
       role: req.user.role,
       note: note.trim(),
@@ -349,103 +551,5 @@ exports.addTaskNote = async (req, res) => {
   } catch (error) {
     console.error("Add task note error:", error);
     return sendError(res, 500, "Failed to add note");
-  }
-};
-
-exports.updateTask = async (req, res) => {
-  try {
-    if (req.user?.role !== "admin") {
-      return sendError(res, 403, "Only admin can edit tasks");
-    }
-
-    const task = await Task.findById(req.params.id);
-
-    if (!task) {
-      return sendError(res, 404, "Task not found");
-    }
-
-    if (["completed", "cancelled"].includes(task.status)) {
-      return sendError(
-        res,
-        400,
-        "Completed or cancelled tasks cannot be edited"
-      );
-    }
-
-    const { title, description, priority, dueDate, assignedTo } = req.body;
-
-    if (!title || !title.trim()) {
-      return sendError(res, 400, "Task title is required");
-    }
-
-    if (!assignedTo) {
-      return sendError(res, 400, "Assigned employee is required");
-    }
-
-    const assignedUser = await User.findById(assignedTo);
-
-    if (!assignedUser) {
-      return sendError(res, 404, "Assigned user not found");
-    }
-
-    if (!["employee", "manager"].includes(assignedUser.role)) {
-      return sendError(
-        res,
-        400,
-        "Task can be assigned only to employee or manager"
-      );
-    }
-
-    task.title = title.trim();
-    task.description = description?.trim() || "";
-    task.priority = priority || "medium";
-    task.dueDate = dueDate || null;
-    task.assignedTo = assignedTo;
-
-    await task.save();
-
-    const updatedTask = await populateTask(Task.findById(task._id));
-
-    emitSocketEvent(req, "taskUpdated", formatTask(updatedTask));
-
-    return res.status(200).json({
-      success: true,
-      message: "Task updated successfully",
-      task: formatTask(updatedTask),
-    });
-  } catch (error) {
-    console.error("Update task error:", error);
-    return sendError(res, 500, "Failed to update task");
-  }
-};
-
-exports.deleteTask = async (req, res) => {
-  try {
-    if (req.user?.role !== "admin") {
-      return sendError(res, 403, "Only admin can remove tasks");
-    }
-
-    const task = await Task.findById(req.params.id);
-
-    if (!task) {
-      return sendError(res, 404, "Task not found");
-    }
-
-    const taskId = task._id;
-
-    await Task.findByIdAndDelete(taskId);
-
-    emitSocketEvent(req, "taskDeleted", {
-      _id: taskId,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Task removed successfully",
-      deletedTaskId: taskId,
-    });
-  } catch (error) {
-    console.error("Delete task error:", error);
-    return sendError(res, 500, "Failed to remove task");
   }
 };

@@ -22,6 +22,18 @@ const getUserLabel = (user) => {
   );
 };
 
+const getAssignedLabels = (assignedTo) => {
+  const list = Array.isArray(assignedTo)
+    ? assignedTo
+    : assignedTo
+    ? [assignedTo]
+    : [];
+
+  if (!list.length) return "Not assigned";
+
+  return list.map(getUserLabel).join(", ");
+};
+
 const formatDate = (value) => {
   if (!value) return "-";
 
@@ -90,23 +102,21 @@ const EmployeeTaskPanel = () => {
 
       setTasks(loadedTasks);
 
-      if (loadedTasks.length > 0) {
-        const stillSelected = loadedTasks.find(
-          (task) => task._id === selectedTaskId
+      setSelectedTaskId((previousSelectedId) => {
+        if (!loadedTasks.length) return "";
+
+        const stillSelected = loadedTasks.some(
+          (task) => task._id === previousSelectedId
         );
 
-        if (!stillSelected) {
-          setSelectedTaskId(loadedTasks[0]._id);
-        }
-      } else {
-        setSelectedTaskId("");
-      }
+        return stillSelected ? previousSelectedId : loadedTasks[0]._id;
+      });
     } catch (err) {
       setError(err.message || "Failed to load tasks");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, selectedTaskId]);
+  }, [statusFilter]);
 
   useEffect(() => {
     loadTasks();
@@ -297,8 +307,13 @@ const EmployeeTaskPanel = () => {
                     >
                       {task.priority}
                     </span>
+
                     <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
                       Due: {formatDate(task.dueDate)}
+                    </span>
+
+                    <span className="rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-700">
+                      {task.assignedToCount || 1} assigned
                     </span>
                   </div>
                 </button>
@@ -348,6 +363,13 @@ const EmployeeTaskPanel = () => {
                   {formatDate(selectedTask.dueDate)}
                 </div>
 
+                <div className="rounded-xl bg-gray-50 p-3 md:col-span-2">
+                  <span className="block text-xs font-bold uppercase text-gray-400">
+                    Assigned Team
+                  </span>
+                  {getAssignedLabels(selectedTask.assignedTo)}
+                </div>
+
                 <div className="rounded-xl bg-gray-50 p-3">
                   <span className="block text-xs font-bold uppercase text-gray-400">
                     Started At
@@ -382,6 +404,7 @@ const EmployeeTaskPanel = () => {
                   <label className="mb-1 block text-sm font-semibold text-gray-700">
                     Completion Remark
                   </label>
+
                   <textarea
                     value={completionRemark}
                     onChange={(event) => setCompletionRemark(event.target.value)}
@@ -407,6 +430,7 @@ const EmployeeTaskPanel = () => {
                 <label className="mb-1 block text-sm font-semibold text-gray-700">
                   Add Work Note
                 </label>
+
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -447,6 +471,7 @@ const EmployeeTaskPanel = () => {
                           </span>
                           <span>{formatDateTime(note.createdAt)}</span>
                         </div>
+
                         <p className="text-sm text-gray-700">{note.note}</p>
                       </div>
                     ))}

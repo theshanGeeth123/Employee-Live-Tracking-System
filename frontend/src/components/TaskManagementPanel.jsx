@@ -28,6 +28,33 @@ const getUserLabel = (user) => {
   );
 };
 
+const getUserId = (user) => {
+  if (!user) return "";
+  return String(user._id || user.id || user);
+};
+
+const getAssignedIds = (assignedTo) => {
+  const list = Array.isArray(assignedTo)
+    ? assignedTo
+    : assignedTo
+    ? [assignedTo]
+    : [];
+
+  return list.map(getUserId).filter(Boolean);
+};
+
+const getAssignedLabels = (assignedTo) => {
+  const list = Array.isArray(assignedTo)
+    ? assignedTo
+    : assignedTo
+    ? [assignedTo]
+    : [];
+
+  if (!list.length) return "Not assigned";
+
+  return list.map(getUserLabel).join(", ");
+};
+
 const formatDate = (value) => {
   if (!value) return "-";
 
@@ -73,6 +100,109 @@ const priorityClass = (priority) => {
   return "bg-green-100 text-green-700";
 };
 
+const EmployeeMultiSelect = ({
+  users,
+  selectedIds,
+  onToggle,
+  search,
+  onSearchChange,
+  roleFilter,
+  onRoleFilterChange,
+  title = "Assign Employees",
+}) => {
+  const filteredUsers = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+
+    return users.filter((user) => {
+      const label = getUserLabel(user).toLowerCase();
+      const email = String(user.email || "").toLowerCase();
+      const role = String(user.role || "").toLowerCase();
+
+      const matchesRole = roleFilter === "all" || role === roleFilter;
+
+      const matchesSearch =
+        !keyword ||
+        label.includes(keyword) ||
+        email.includes(keyword) ||
+        role.includes(keyword);
+
+      return matchesRole && matchesSearch;
+    });
+  }, [users, search, roleFilter]);
+
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-semibold text-gray-700">
+        {title}
+      </label>
+
+      <div className="mb-3 grid gap-3 sm:grid-cols-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search by name, email or role..."
+          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+        />
+
+        <select
+          value={roleFilter}
+          onChange={(event) => onRoleFilterChange(event.target.value)}
+          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+        >
+          <option value="all">All Roles</option>
+          <option value="employee">Employees</option>
+          <option value="manager">Managers</option>
+        </select>
+      </div>
+
+      <div className="max-h-52 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3">
+        {filteredUsers.length === 0 ? (
+          <p className="text-sm text-gray-500">No users found.</p>
+        ) : (
+          <div className="grid gap-2">
+            {filteredUsers.map((user) => {
+              const userId = getUserId(user);
+              const checked = selectedIds.includes(userId);
+
+              return (
+                <label
+                  key={userId}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm transition ${
+                    checked
+                      ? "border-blue-400 bg-blue-50"
+                      : "border-gray-200 bg-white hover:bg-gray-50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggle(userId)}
+                    className="h-4 w-4"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900">
+                      {getUserLabel(user)}
+                    </p>
+                    <p className="truncate text-xs text-gray-500">
+                      {user.email || "No email"} • {user.role}
+                    </p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <p className="mt-2 text-xs font-semibold text-blue-700">
+        Selected: {selectedIds.length}
+      </p>
+    </div>
+  );
+};
+
 const TaskManagementPanel = () => {
   const { user } = useAuth();
   const socketContext = useSocket();
@@ -95,7 +225,7 @@ const TaskManagementPanel = () => {
     description: "",
     priority: "medium",
     dueDate: "",
-    assignedTo: "",
+    assignedTo: [],
   });
 
   const [editMode, setEditMode] = useState(false);
@@ -105,8 +235,13 @@ const TaskManagementPanel = () => {
     description: "",
     priority: "medium",
     dueDate: "",
-    assignedTo: "",
+    assignedTo: [],
   });
+
+  const [createUserSearch, setCreateUserSearch] = useState("");
+  const [createRoleFilter, setCreateRoleFilter] = useState("all");
+  const [editUserSearch, setEditUserSearch] = useState("");
+  const [editRoleFilter, setEditRoleFilter] = useState("all");
 
   const [noteText, setNoteText] = useState("");
 
@@ -127,7 +262,7 @@ const TaskManagementPanel = () => {
         description: "",
         priority: "medium",
         dueDate: "",
-        assignedTo: "",
+        assignedTo: [],
       });
       return;
     }
@@ -137,7 +272,7 @@ const TaskManagementPanel = () => {
       description: selectedTask.description || "",
       priority: selectedTask.priority || "medium",
       dueDate: toDateInputValue(selectedTask.dueDate),
-      assignedTo: selectedTask.assignedTo?._id || selectedTask.assignedTo || "",
+      assignedTo: getAssignedIds(selectedTask.assignedTo),
     });
   }, [selectedTask]);
 
@@ -156,23 +291,21 @@ const TaskManagementPanel = () => {
 
       setTasks(loadedTasks);
 
-      if (loadedTasks.length > 0) {
-        const stillSelected = loadedTasks.find(
-          (task) => task._id === selectedTaskId
+      setSelectedTaskId((previousSelectedId) => {
+        if (!loadedTasks.length) return "";
+
+        const stillSelected = loadedTasks.some(
+          (task) => task._id === previousSelectedId
         );
 
-        if (!stillSelected) {
-          setSelectedTaskId(loadedTasks[0]._id);
-        }
-      } else {
-        setSelectedTaskId("");
-      }
+        return stillSelected ? previousSelectedId : loadedTasks[0]._id;
+      });
     } catch (err) {
       setError(err.message || "Failed to load tasks");
     } finally {
       setLoading(false);
     }
-  }, [filters, selectedTaskId]);
+  }, [filters]);
 
   useEffect(() => {
     loadUsers().catch((err) => {
@@ -209,6 +342,32 @@ const TaskManagementPanel = () => {
     setSuccess("");
   };
 
+  const toggleCreateAssignedUser = (userId) => {
+    setForm((previous) => {
+      const exists = previous.assignedTo.includes(userId);
+
+      return {
+        ...previous,
+        assignedTo: exists
+          ? previous.assignedTo.filter((id) => id !== userId)
+          : [...previous.assignedTo, userId],
+      };
+    });
+  };
+
+  const toggleEditAssignedUser = (userId) => {
+    setEditForm((previous) => {
+      const exists = previous.assignedTo.includes(userId);
+
+      return {
+        ...previous,
+        assignedTo: exists
+          ? previous.assignedTo.filter((id) => id !== userId)
+          : [...previous.assignedTo, userId],
+      };
+    });
+  };
+
   const handleFormChange = (event) => {
     const { name, value } = event.target;
 
@@ -236,8 +395,8 @@ const TaskManagementPanel = () => {
       return;
     }
 
-    if (!form.assignedTo) {
-      setError("Please select an employee");
+    if (!form.assignedTo.length) {
+      setError("Please select at least one employee or manager");
       return;
     }
 
@@ -259,7 +418,7 @@ const TaskManagementPanel = () => {
         description: "",
         priority: "medium",
         dueDate: "",
-        assignedTo: "",
+        assignedTo: [],
       });
 
       await loadTasks();
@@ -284,8 +443,8 @@ const TaskManagementPanel = () => {
       return;
     }
 
-    if (!editForm.assignedTo) {
-      setError("Please select an employee");
+    if (!editForm.assignedTo.length) {
+      setError("Please select at least one employee or manager");
       return;
     }
 
@@ -430,7 +589,7 @@ const TaskManagementPanel = () => {
         <div className="mb-5">
           <h2 className="text-xl font-bold text-gray-900">Task Assignment</h2>
           <p className="text-sm text-gray-500">
-            Assign tasks to employees and track their daily work progress.
+            Assign one task to one or many employees/managers and track progress.
           </p>
         </div>
 
@@ -463,25 +622,6 @@ const TaskManagementPanel = () => {
 
           <div>
             <label className="mb-1 block text-sm font-semibold text-gray-700">
-              Assign To
-            </label>
-            <select
-              name="assignedTo"
-              value={form.assignedTo}
-              onChange={handleFormChange}
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
-            >
-              <option value="">Select employee</option>
-              {users.map((item) => (
-                <option key={item._id} value={item._id}>
-                  {getUserLabel(item)} - {item.role}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-semibold text-gray-700">
               Priority
             </label>
             <select
@@ -506,6 +646,19 @@ const TaskManagementPanel = () => {
               value={form.dueDate}
               onChange={handleFormChange}
               className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="lg:col-span-2">
+            <EmployeeMultiSelect
+              users={users}
+              selectedIds={form.assignedTo}
+              onToggle={toggleCreateAssignedUser}
+              search={createUserSearch}
+              onSearchChange={setCreateUserSearch}
+              roleFilter={createRoleFilter}
+              onRoleFilterChange={setCreateRoleFilter}
+              title="Assign To One or Many"
             />
           </div>
 
@@ -580,10 +733,10 @@ const TaskManagementPanel = () => {
               }
               className="rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
             >
-              <option value="all">All Employees</option>
+              <option value="all">All Assigned Users</option>
               {users.map((item) => (
                 <option key={item._id} value={item._id}>
-                  {getUserLabel(item)}
+                  {getUserLabel(item)} - {item.role}
                 </option>
               ))}
             </select>
@@ -632,10 +785,13 @@ const TaskManagementPanel = () => {
                     <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
                       Due: {formatDate(task.dueDate)}
                     </span>
+                    <span className="rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-700">
+                      {task.assignedToCount || getAssignedIds(task.assignedTo).length} assigned
+                    </span>
                   </div>
 
-                  <p className="mt-3 text-xs text-gray-500">
-                    Assigned to: {getUserLabel(task.assignedTo)}
+                  <p className="mt-3 line-clamp-2 text-xs text-gray-500">
+                    Assigned to: {getAssignedLabels(task.assignedTo)}
                   </p>
                 </button>
               ))}
@@ -670,11 +826,11 @@ const TaskManagementPanel = () => {
               </div>
 
               <div className="mb-5 grid gap-3 text-sm md:grid-cols-2">
-                <div className="rounded-xl bg-gray-50 p-3">
+                <div className="rounded-xl bg-gray-50 p-3 md:col-span-2">
                   <span className="block text-xs font-bold uppercase text-gray-400">
                     Assigned To
                   </span>
-                  {getUserLabel(selectedTask.assignedTo)}
+                  {getAssignedLabels(selectedTask.assignedTo)}
                 </div>
 
                 <div className="rounded-xl bg-gray-50 p-3">
@@ -697,6 +853,14 @@ const TaskManagementPanel = () => {
                   </span>
                   {selectedTask.priority}
                 </div>
+
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <span className="block text-xs font-bold uppercase text-gray-400">
+                    Assigned Count
+                  </span>
+                  {selectedTask.assignedToCount ||
+                    getAssignedIds(selectedTask.assignedTo).length}
+                </div>
               </div>
 
               {isAdmin && (
@@ -707,7 +871,7 @@ const TaskManagementPanel = () => {
                         Admin Task Control
                       </h4>
                       <p className="text-sm text-gray-500">
-                        Edit active tasks or remove any selected task.
+                        Edit task details, assigned users, or remove this task.
                       </p>
                     </div>
 
@@ -756,25 +920,6 @@ const TaskManagementPanel = () => {
 
                       <div>
                         <label className="mb-1 block text-sm font-semibold text-gray-700">
-                          Assign To
-                        </label>
-                        <select
-                          name="assignedTo"
-                          value={editForm.assignedTo}
-                          onChange={handleEditFormChange}
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
-                        >
-                          <option value="">Select employee</option>
-                          {users.map((item) => (
-                            <option key={item._id} value={item._id}>
-                              {getUserLabel(item)} - {item.role}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-sm font-semibold text-gray-700">
                           Priority
                         </label>
                         <select
@@ -799,6 +944,19 @@ const TaskManagementPanel = () => {
                           value={editForm.dueDate}
                           onChange={handleEditFormChange}
                           className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div className="lg:col-span-2">
+                        <EmployeeMultiSelect
+                          users={users}
+                          selectedIds={editForm.assignedTo}
+                          onToggle={toggleEditAssignedUser}
+                          search={editUserSearch}
+                          onSearchChange={setEditUserSearch}
+                          roleFilter={editRoleFilter}
+                          onRoleFilterChange={setEditRoleFilter}
+                          title="Edit Assigned Users"
                         />
                       </div>
 
@@ -882,6 +1040,7 @@ const TaskManagementPanel = () => {
                 <label className="mb-1 block text-sm font-semibold text-gray-700">
                   Add Work Note
                 </label>
+
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -922,6 +1081,7 @@ const TaskManagementPanel = () => {
                           </span>
                           <span>{formatDateTime(note.createdAt)}</span>
                         </div>
+
                         <p className="text-sm text-gray-700">{note.note}</p>
                       </div>
                     ))}

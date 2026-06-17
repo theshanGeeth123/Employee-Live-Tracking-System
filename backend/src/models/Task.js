@@ -7,16 +7,19 @@ const taskNoteSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
     name: {
       type: String,
       required: true,
       trim: true,
     },
+
     role: {
       type: String,
       enum: ["admin", "manager", "employee"],
       required: true,
     },
+
     note: {
       type: String,
       required: true,
@@ -34,16 +37,19 @@ const taskStatusHistorySchema = new mongoose.Schema(
       enum: ["pending", "in-progress", "completed", "cancelled"],
       required: true,
     },
+
     changedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+
     changedByName: {
       type: String,
       required: true,
       trim: true,
     },
+
     changedAt: {
       type: Date,
       default: Date.now,
@@ -79,12 +85,13 @@ const taskSchema = new mongoose.Schema(
       default: null,
     },
 
-    assignedTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      index: true,
-    },
+    assignedTo: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        index: true,
+      },
+    ],
 
     assignedBy: {
       type: mongoose.Schema.Types.ObjectId,
