@@ -9,6 +9,7 @@ import {
   Users,
   Coffee,
   Video,
+  ClipboardCheck,
 } from "lucide-react";
 
 import AdminBreakReport from "../components/AdminBreakReport";
@@ -24,6 +25,7 @@ import NotificationsPanel from "../components/NotificationsPanel";
 import AdminUserManagement from "../components/AdminUserManagement";
 import SettingsPanel from "../components/SettingsPanel";
 import ProfilePanel from "../components/ProfilePanel";
+import TaskManagementPanel from "../components/TaskManagementPanel";
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -66,6 +68,11 @@ const AdminDashboard = () => {
       key: "meetings",
       label: "Meetings",
       icon: Video,
+    },
+    {
+      key: "tasks",
+      label: "Tasks",
+      icon: ClipboardCheck,
     },
     {
       key: "settings",
@@ -114,6 +121,10 @@ const AdminDashboard = () => {
 
     if (activeSection === "profile") {
       return <ProfilePanel />;
+    }
+
+    if (activeSection === "tasks") {
+      return <TaskManagementPanel />;
     }
 
     return <DailyAttendanceReport />;

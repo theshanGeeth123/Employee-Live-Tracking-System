@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   UserCircle,
   Video,
+  ClipboardCheck
 } from "lucide-react";
 
 import AdminBreakReport from "../components/AdminBreakReport";
@@ -18,6 +19,7 @@ import DailyAttendanceReport from "../components/DailyAttendanceReport";
 import NotificationsPanel from "../components/NotificationsPanel";
 import ProfilePanel from "../components/ProfilePanel";
 import UserMeetingPanel from "../components/UserMeetingPanel";
+import TaskManagementPanel from "../components/TaskManagementPanel";
 
 const ManagerDashboard = () => {
   const { user, logout } = useAuth();
@@ -56,6 +58,11 @@ const ManagerDashboard = () => {
       label: "Profile",
       icon: UserCircle,
     },
+    {
+    key: "tasks",
+    label: "Tasks",
+    icon: ClipboardCheck,
+  },
   ];
 
   const renderContent = () => {
@@ -81,6 +88,10 @@ const ManagerDashboard = () => {
 
     if (activeSection === "profile") {
       return <ProfilePanel />;
+    }
+
+    if (activeSection === "tasks") {
+      return <TaskManagementPanel />;
     }
 
     return <DailyAttendanceReport />;
