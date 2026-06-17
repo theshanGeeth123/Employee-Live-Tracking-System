@@ -21,6 +21,7 @@ const leaveRoutes = require("./routes/leaveRoutes");
 const attendanceSummaryRoutes = require("./routes/attendanceSummaryRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
+const meetingRoutes = require("./routes/meetingRoutes");
 
 const setupPresenceSocket = require("./socket/presenceSocket");
 
@@ -35,11 +36,14 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL,
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   },
 });
+
+// IMPORTANT: Make Socket.IO available inside controllers
+app.set("io", io);
 
 // Socket.IO setup
 setupPresenceSocket(io);
@@ -47,7 +51,7 @@ setupPresenceSocket(io);
 // Middlewares
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
   })
 );
@@ -55,9 +59,6 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-// Make io available in controllers later if needed
-app.set("io", io);
 
 // Test route
 app.get("/", (req, res) => {
@@ -85,6 +86,7 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/attendance-summary", attendanceSummaryRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/meetings", meetingRoutes);
 
 // 404 route
 app.use((req, res) => {
@@ -158,6 +160,7 @@ const startServer = async () => {
 
     server.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
+      console.log(`Client URL: ${process.env.CLIENT_URL || "http://localhost:5173"}`);
     });
   } catch (error) {
     console.error("Server startup failed:", error.message);

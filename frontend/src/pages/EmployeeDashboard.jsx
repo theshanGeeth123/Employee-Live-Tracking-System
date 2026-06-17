@@ -4,6 +4,7 @@ import {
   CalendarCheck,
   LayoutDashboard,
   UserCircle,
+  Video,
 } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
@@ -14,6 +15,7 @@ import EmployeeActivityPanel from "../components/EmployeeActivityPanel";
 import EmployeeLeavePanel from "../components/EmployeeLeavePanel";
 import NotificationsPanel from "../components/NotificationsPanel";
 import ProfilePanel from "../components/ProfilePanel";
+import UserMeetingPanel from "../components/UserMeetingPanel";
 
 const EmployeeDashboard = () => {
   const { user, logout } = useAuth();
@@ -26,6 +28,11 @@ const EmployeeDashboard = () => {
       key: "dashboard",
       label: "My Activity",
       icon: LayoutDashboard,
+    },
+    {
+      key: "meetings",
+      label: "Meetings",
+      icon: Video,
     },
     {
       key: "leaves",
@@ -47,6 +54,10 @@ const EmployeeDashboard = () => {
   const renderContent = () => {
     if (activeSection === "dashboard") {
       return <EmployeeActivityPanel />;
+    }
+
+    if (activeSection === "meetings") {
+      return <UserMeetingPanel />;
     }
 
     if (activeSection === "leaves") {

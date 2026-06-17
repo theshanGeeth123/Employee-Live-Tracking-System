@@ -5,6 +5,7 @@ import {
   Coffee,
   LayoutDashboard,
   UserCircle,
+  Video,
 } from "lucide-react";
 
 import AdminBreakReport from "../components/AdminBreakReport";
@@ -16,6 +17,7 @@ import DashboardShell from "../components/DashboardShell";
 import DailyAttendanceReport from "../components/DailyAttendanceReport";
 import NotificationsPanel from "../components/NotificationsPanel";
 import ProfilePanel from "../components/ProfilePanel";
+import UserMeetingPanel from "../components/UserMeetingPanel";
 
 const ManagerDashboard = () => {
   const { user, logout } = useAuth();
@@ -45,6 +47,11 @@ const ManagerDashboard = () => {
       icon: Coffee,
     },
     {
+      key: "meetings",
+      label: "Meetings",
+      icon: Video,
+    },
+    {
       key: "profile",
       label: "Profile",
       icon: UserCircle,
@@ -64,12 +71,16 @@ const ManagerDashboard = () => {
       return <NotificationsPanel />;
     }
 
-    if (activeSection === "profile") {
-      return <ProfilePanel />;
-    }
-
     if (activeSection === "breaks") {
       return <AdminBreakReport />;
+    }
+
+    if (activeSection === "meetings") {
+      return <UserMeetingPanel />;
+    }
+
+    if (activeSection === "profile") {
+      return <ProfilePanel />;
     }
 
     return <DailyAttendanceReport />;

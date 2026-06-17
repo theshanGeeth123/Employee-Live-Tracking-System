@@ -7,10 +7,12 @@ import {
   Settings,
   UserCircle,
   Users,
-  Coffee
+  Coffee,
+  Video,
 } from "lucide-react";
 
 import AdminBreakReport from "../components/AdminBreakReport";
+import AdminMeetingPanel from "../components/AdminMeetingPanel";
 
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
@@ -61,6 +63,11 @@ const AdminDashboard = () => {
       icon: Coffee,
     },
     {
+      key: "meetings",
+      label: "Meetings",
+      icon: Video,
+    },
+    {
       key: "settings",
       label: "Settings",
       icon: Settings,
@@ -93,6 +100,14 @@ const AdminDashboard = () => {
       return <AdminUserManagement />;
     }
 
+    if (activeSection === "breaks") {
+      return <AdminBreakReport />;
+    }
+
+    if (activeSection === "meetings") {
+      return <AdminMeetingPanel />;
+    }
+
     if (activeSection === "settings") {
       return <SettingsPanel />;
     }
@@ -100,10 +115,6 @@ const AdminDashboard = () => {
     if (activeSection === "profile") {
       return <ProfilePanel />;
     }
-
-    if (activeSection === "breaks") {
-    return <AdminBreakReport />;
-  }
 
     return <DailyAttendanceReport />;
   };
