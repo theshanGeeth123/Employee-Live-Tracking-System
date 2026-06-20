@@ -10,6 +10,7 @@ import {
   Coffee,
   Video,
   ClipboardCheck,
+  BarChart3 ,
 } from "lucide-react";
 
 import AdminBreakReport from "../components/AdminBreakReport";
@@ -26,6 +27,7 @@ import AdminUserManagement from "../components/AdminUserManagement";
 import SettingsPanel from "../components/SettingsPanel";
 import ProfilePanel from "../components/ProfilePanel";
 import TaskManagementPanel from "../components/TaskManagementPanel";
+import ActivityReportsPanel from "../components/ActivityReportsPanel";
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -73,6 +75,11 @@ const AdminDashboard = () => {
       key: "tasks",
       label: "Tasks",
       icon: ClipboardCheck,
+    },
+    {
+      key: "activityReports",
+      label: "Activity Reports",
+      icon: BarChart3,
     },
     {
       key: "settings",
@@ -125,6 +132,9 @@ const AdminDashboard = () => {
 
     if (activeSection === "tasks") {
       return <TaskManagementPanel />;
+    }
+    if (activeSection === "activityReports") {
+      return <ActivityReportsPanel />;
     }
 
     return <DailyAttendanceReport />;
