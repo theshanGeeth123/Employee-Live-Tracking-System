@@ -53,6 +53,17 @@ const request = async (path, options = {}) => {
   return data;
 };
 
+export const getMeetingInviteUsers = ({ search = "", role = "all" } = {}) => {
+  const params = new URLSearchParams();
+
+  if (search) params.set("search", search);
+  if (role) params.set("role", role);
+
+  const query = params.toString();
+
+  return request(`/meetings/invite-users${query ? `?${query}` : ""}`);
+};
+
 export const createMeeting = (payload) => {
   return request("/meetings", {
     method: "POST",

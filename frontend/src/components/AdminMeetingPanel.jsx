@@ -1,11 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  Clock,
+  Link as LinkIcon,
+  Play,
+  Plus,
+  RefreshCcw,
+  Search,
+  Square,
+  UserCheck,
+  Users,
+  X,
+} from "lucide-react";
 import {
   createMeeting,
   endMeeting,
   getAdminMeetings,
+  getMeetingInviteUsers,
   startMeeting,
 } from "../api/meetingApi";
-import MeetingJoinReport from "./MeetingJoinReport";
 import { useSocket } from "../context/SocketContext";
 
 const todayInputValue = () => {
@@ -13,6 +27,12 @@ const todayInputValue = () => {
   const offset = now.getTimezoneOffset();
   const localDate = new Date(now.getTime() - offset * 60 * 1000);
   return localDate.toISOString().slice(0, 10);
+};
+
+const statusClass = {
+  scheduled: "bg-blue-100 text-blue-700",
+  live: "bg-emerald-100 text-emerald-700",
+  ended: "bg-slate-100 text-slate-700",
 };
 
 const formatDateTime = (value) => {
@@ -27,74 +47,85 @@ const formatDateTime = (value) => {
   });
 };
 
-const statusBadgeClass = (status) => {
-  if (status === "live") {
-    return "bg-green-100 text-green-700";
-  }
-
-  if (status === "scheduled") {
-    return "bg-blue-100 text-blue-700";
-  }
-
-  return "bg-gray-100 text-gray-700";
+const getUserId = (user) => {
+  return String(user?._id || user?.id || user?.user || "");
 };
 
 const AdminMeetingPanel = () => {
   const socketContext = useSocket();
   const socket = socketContext?.socket || socketContext;
+  const connected = socketContext?.connected;
 
   const [form, setForm] = useState({
     title: "",
     description: "",
     meetingUrl: "",
+    invitationMode: "selected",
   });
 
-  const [selectedDate, setSelectedDate] = useState(todayInputValue());
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [inviteSearch, setInviteSearch] = useState("");
+  const [inviteRole, setInviteRole] = useState("all");
+  const [inviteUsers, setInviteUsers] = useState([]);
+  const [selectedUsers, setSelectedUsers] = useState([]);
 
+  const [meetingDate, setMeetingDate] = useState(todayInputValue());
+  const [meetingStatus, setMeetingStatus] = useState("all");
   const [meetings, setMeetings] = useState([]);
-  const [selectedMeetingId, setSelectedMeetingId] = useState("");
 
-  const [loading, setLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState("");
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingMeetings, setLoadingMeetings] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState("");
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const selectedUserIds = useMemo(() => {
+    return selectedUsers.map((user) => getUserId(user));
+  }, [selectedUsers]);
+
+  const liveMeeting = useMemo(() => {
+    return meetings.find((meeting) => meeting.status === "live") || null;
+  }, [meetings]);
+
+  const loadInviteUsers = useCallback(async () => {
+    try {
+      setLoadingUsers(true);
+
+      const data = await getMeetingInviteUsers({
+        search: inviteSearch,
+        role: inviteRole,
+      });
+
+      setInviteUsers(data.users || []);
+    } catch (error) {
+      setError(error.message || "Failed to load users");
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [inviteSearch, inviteRole]);
+
   const loadMeetings = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoadingMeetings(true);
       setError("");
 
       const data = await getAdminMeetings({
-        date: selectedDate,
-        status: statusFilter,
+        date: meetingDate,
+        status: meetingStatus,
       });
 
-      const loadedMeetings = data.meetings || [];
-
-      setMeetings(loadedMeetings);
-
-      if (loadedMeetings.length > 0) {
-        const existingSelected = loadedMeetings.find(
-          (meeting) => meeting._id === selectedMeetingId
-        );
-
-        if (!existingSelected) {
-          const liveMeeting = loadedMeetings.find(
-            (meeting) => meeting.status === "live"
-          );
-
-          setSelectedMeetingId((liveMeeting || loadedMeetings[0])._id);
-        }
-      } else {
-        setSelectedMeetingId("");
-      }
-    } catch (err) {
-      setError(err.message || "Failed to load meetings");
+      setMeetings(data.meetings || []);
+    } catch (error) {
+      setError(error.message || "Failed to load meetings");
     } finally {
-      setLoading(false);
+      setLoadingMeetings(false);
     }
-  }, [selectedDate, statusFilter, selectedMeetingId]);
+  }, [meetingDate, meetingStatus]);
+
+  useEffect(() => {
+    loadInviteUsers();
+  }, [loadInviteUsers]);
 
   useEffect(() => {
     loadMeetings();
@@ -107,28 +138,25 @@ const AdminMeetingPanel = () => {
       loadMeetings();
     };
 
-    socket.on("meetingCreated", refresh);
-    socket.on("meetingStarted", refresh);
-    socket.on("meetingEnded", refresh);
-    socket.on("meetingUserJoined", refresh);
+    const events = [
+      "meetingCreated",
+      "meetingStarted",
+      "meetingEnded",
+      "meetingUserJoined",
+    ];
+
+    events.forEach((eventName) => {
+      socket.on(eventName, refresh);
+    });
 
     return () => {
-      socket.off?.("meetingCreated", refresh);
-      socket.off?.("meetingStarted", refresh);
-      socket.off?.("meetingEnded", refresh);
-      socket.off?.("meetingUserJoined", refresh);
+      events.forEach((eventName) => {
+        socket.off?.(eventName, refresh);
+      });
     };
   }, [socket, loadMeetings]);
 
-  const selectedMeeting = useMemo(() => {
-    return meetings.find((meeting) => meeting._id === selectedMeetingId) || null;
-  }, [meetings, selectedMeetingId]);
-
-  const liveMeeting = useMemo(() => {
-    return meetings.find((meeting) => meeting.status === "live") || null;
-  }, [meetings]);
-
-  const handleInputChange = (event) => {
+  const handleFormChange = (event) => {
     const { name, value } = event.target;
 
     setForm((previous) => ({
@@ -137,14 +165,42 @@ const AdminMeetingPanel = () => {
     }));
   };
 
-  const resetMessages = () => {
-    setError("");
-    setSuccess("");
+  const toggleSelectedUser = (user) => {
+    const userId = getUserId(user);
+
+    setSelectedUsers((previous) => {
+      const exists = previous.some((item) => getUserId(item) === userId);
+
+      if (exists) {
+        return previous.filter((item) => getUserId(item) !== userId);
+      }
+
+      return [...previous, user];
+    });
+  };
+
+  const removeSelectedUser = (userId) => {
+    setSelectedUsers((previous) =>
+      previous.filter((user) => getUserId(user) !== userId)
+    );
+  };
+
+  const resetForm = () => {
+    setForm({
+      title: "",
+      description: "",
+      meetingUrl: "",
+      invitationMode: "selected",
+    });
+
+    setSelectedUsers([]);
   };
 
   const handleCreateMeeting = async (event) => {
     event.preventDefault();
-    resetMessages();
+
+    setError("");
+    setSuccess("");
 
     if (!form.title.trim()) {
       setError("Meeting title is required");
@@ -156,197 +212,414 @@ const AdminMeetingPanel = () => {
       return;
     }
 
-    try {
-      setActionLoading("create");
+    if (form.invitationMode === "selected" && selectedUsers.length === 0) {
+      setError("Please select at least one meeting receiver");
+      return;
+    }
 
-      const data = await createMeeting({
+    try {
+      setSubmitting(true);
+
+      const payload = {
         title: form.title.trim(),
         description: form.description.trim(),
         meetingUrl: form.meetingUrl.trim(),
-      });
+        invitationMode: form.invitationMode,
+        invitedUsers:
+          form.invitationMode === "selected" ? selectedUserIds : [],
+      };
+
+      const data = await createMeeting(payload);
 
       setSuccess(data.message || "Meeting created successfully");
-
-      setForm({
-        title: "",
-        description: "",
-        meetingUrl: "",
-      });
-
+      resetForm();
       await loadMeetings();
-
-      if (data.meeting?._id) {
-        setSelectedMeetingId(data.meeting._id);
-      }
-    } catch (err) {
-      setError(err.message || "Failed to create meeting");
+    } catch (error) {
+      setError(error.message || "Failed to create meeting");
     } finally {
-      setActionLoading("");
+      setSubmitting(false);
     }
   };
 
   const handleStartMeeting = async (meetingId) => {
-    resetMessages();
+    setError("");
+    setSuccess("");
 
     try {
-      setActionLoading(`start-${meetingId}`);
+      setActionLoadingId(meetingId);
 
       const data = await startMeeting(meetingId);
 
       setSuccess(data.message || "Meeting started successfully");
-
       await loadMeetings();
-      setSelectedMeetingId(meetingId);
-    } catch (err) {
-      setError(err.message || "Failed to start meeting");
+    } catch (error) {
+      setError(error.message || "Failed to start meeting");
     } finally {
-      setActionLoading("");
+      setActionLoadingId("");
     }
   };
 
   const handleEndMeeting = async (meetingId) => {
-    resetMessages();
+    setError("");
+    setSuccess("");
 
     try {
-      setActionLoading(`end-${meetingId}`);
+      setActionLoadingId(meetingId);
 
       const data = await endMeeting(meetingId);
 
       setSuccess(data.message || "Meeting ended successfully");
-
       await loadMeetings();
-      setSelectedMeetingId(meetingId);
-    } catch (err) {
-      setError(err.message || "Failed to end meeting");
+    } catch (error) {
+      setError(error.message || "Failed to end meeting");
     } finally {
-      setActionLoading("");
+      setActionLoadingId("");
     }
   };
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <div className="mb-5 flex flex-col justify-between gap-3 xl:flex-row xl:items-start">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Live Meeting Control</h2>
-            <p className="text-sm text-gray-500">
-              Create, start, end, and track meeting join activity.
+            <h2 className="text-lg font-semibold text-slate-900">
+              Meeting Management
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Create meetings for everyone or selected employees/managers only.
+            </p>
+
+            <p className="mt-1 text-xs text-slate-400">
+              Socket:{" "}
+              <span className={connected ? "text-emerald-600" : "text-red-600"}>
+                {connected ? "Connected" : "Disconnected"}
+              </span>
             </p>
           </div>
 
-          {liveMeeting && (
-            <div className="rounded-full bg-green-100 px-4 py-2 text-sm font-semibold text-green-700">
-              Live: {liveMeeting.title}
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={loadMeetings}
+            disabled={loadingMeetings}
+            className="flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCcw size={16} />
+            {loadingMeetings ? "Refreshing..." : "Refresh"}
+          </button>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
         {success && (
-          <div className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             {success}
           </div>
         )}
 
-        <form onSubmit={handleCreateMeeting} className="grid gap-4 lg:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-sm font-semibold text-gray-700">
-              Meeting Title
-            </label>
-            <input
-              type="text"
-              name="title"
-              value={form.title}
-              onChange={handleInputChange}
-              placeholder="Daily Team Meeting"
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
+        {liveMeeting && (
+          <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-600">
+                  Current Live Meeting
+                </p>
 
-          <div>
-            <label className="mb-1 block text-sm font-semibold text-gray-700">
-              Meeting Link
-            </label>
-            <input
-              type="url"
-              name="meetingUrl"
-              value={form.meetingUrl}
-              onChange={handleInputChange}
-              placeholder="https://meet.google.com/..."
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
+                <h3 className="mt-1 font-bold text-emerald-900">
+                  {liveMeeting.title}
+                </h3>
 
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={actionLoading === "create"}
-              className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {actionLoading === "create" ? "Creating..." : "Create Meeting"}
-            </button>
-          </div>
+                <p className="mt-1 text-sm text-emerald-700">
+                  Started: {formatDateTime(liveMeeting.startedAt)}
+                </p>
+              </div>
 
-          <div className="lg:col-span-3">
-            <label className="mb-1 block text-sm font-semibold text-gray-700">
-              Description
-            </label>
-            <textarea
-              name="description"
-              value={form.description}
-              onChange={handleInputChange}
-              placeholder="Add meeting details, agenda, or instructions..."
-              rows={3}
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-        </form>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between xl:flex-col xl:items-stretch">
-            <div>
-              <h3 className="text-lg font-bold text-gray-900">Meeting History</h3>
-              <p className="text-sm text-gray-500">Filter meetings by date and status.</p>
+              <button
+                type="button"
+                onClick={() => handleEndMeeting(liveMeeting._id)}
+                disabled={actionLoadingId === liveMeeting._id}
+                className="flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                <Square size={15} />
+                End Live Meeting
+              </button>
             </div>
-
-            <button
-              type="button"
-              onClick={loadMeetings}
-              disabled={loading}
-              className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
-            >
-              {loading ? "Loading..." : "Refresh"}
-            </button>
           </div>
+        )}
 
-          <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+        <form onSubmit={handleCreateMeeting} className="space-y-5">
+          <div className="grid gap-4 xl:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
-                Date
+              <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
+                Meeting Title
               </label>
+
               <input
-                type="date"
-                value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                type="text"
+                name="title"
+                value={form.title}
+                onChange={handleFormChange}
+                placeholder="Example: Daily Standup Meeting"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+              <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
+                Meeting Link
+              </label>
+
+              <div className="relative">
+                <LinkIcon
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+
+                <input
+                  type="url"
+                  name="meetingUrl"
+                  value={form.meetingUrl}
+                  onChange={handleFormChange}
+                  placeholder="https://meet.google.com/..."
+                  className="w-full rounded-xl border border-slate-300 px-9 py-2.5 text-sm outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
+              Description
+            </label>
+
+            <textarea
+              name="description"
+              value={form.description}
+              onChange={handleFormChange}
+              rows={3}
+              placeholder="Add meeting purpose or instructions..."
+              className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+              <div>
+                <h3 className="font-bold text-slate-900">Meeting Receivers</h3>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Select who should receive this meeting. Selected mode hides it
+                  from everyone else.
+                </p>
+              </div>
+
+              <select
+                name="invitationMode"
+                value={form.invitationMode}
+                onChange={handleFormChange}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+              >
+                <option value="selected">Selected People Only</option>
+                <option value="all">Everyone</option>
+              </select>
+            </div>
+
+            {form.invitationMode === "selected" && (
+              <>
+                <div className="mb-4 grid gap-3 md:grid-cols-[1fr_200px]">
+                  <div>
+                    <label className="mb-1 flex items-center gap-1 text-xs font-bold uppercase text-slate-500">
+                      <Search size={14} /> Search Users
+                    </label>
+
+                    <input
+                      type="text"
+                      value={inviteSearch}
+                      onChange={(event) => setInviteSearch(event.target.value)}
+                      placeholder="Search by name, email, department, position..."
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
+                      Role
+                    </label>
+
+                    <select
+                      value={inviteRole}
+                      onChange={(event) => setInviteRole(event.target.value)}
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All</option>
+                      <option value="employee">Employees</option>
+                      <option value="manager">Managers</option>
+                    </select>
+                  </div>
+                </div>
+
+                {selectedUsers.length > 0 && (
+                  <div className="mb-4 rounded-xl bg-white p-3">
+                    <p className="mb-2 text-xs font-bold uppercase text-slate-500">
+                      Selected Receivers ({selectedUsers.length})
+                    </p>
+
+                    <div className="flex flex-wrap gap-2">
+                      {selectedUsers.map((user) => {
+                        const userId = getUserId(user);
+
+                        return (
+                          <span
+                            key={userId}
+                            className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700"
+                          >
+                            {user.name || user.fullName || user.email}
+                            <button
+                              type="button"
+                              onClick={() => removeSelectedUser(userId)}
+                              className="rounded-full hover:bg-blue-200"
+                            >
+                              <X size={13} />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                  {loadingUsers ? (
+                    <div className="p-4 text-sm text-slate-500">
+                      Loading users...
+                    </div>
+                  ) : inviteUsers.length === 0 ? (
+                    <div className="p-4 text-sm text-slate-500">
+                      No users found.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {inviteUsers.map((inviteUser) => {
+                        const userId = getUserId(inviteUser);
+                        const selected = selectedUserIds.includes(userId);
+
+                        return (
+                          <button
+                            key={userId}
+                            type="button"
+                            onClick={() => toggleSelectedUser(inviteUser)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50 ${
+                              selected ? "bg-blue-50" : ""
+                            }`}
+                          >
+                            <div>
+                              <div className="font-semibold text-slate-900">
+                                {inviteUser.name ||
+                                  inviteUser.fullName ||
+                                  inviteUser.email ||
+                                  "-"}
+                              </div>
+
+                              <div className="text-xs text-slate-500">
+                                {inviteUser.email || "-"}
+                              </div>
+
+                              <div className="text-xs capitalize text-slate-400">
+                                {inviteUser.role}
+                                {inviteUser.department
+                                  ? ` | ${inviteUser.department}`
+                                  : ""}
+                                {inviteUser.position
+                                  ? ` | ${inviteUser.position}`
+                                  : ""}
+                              </div>
+                            </div>
+
+                            <div
+                              className={`flex h-6 w-6 items-center justify-center rounded-full border ${
+                                selected
+                                  ? "border-blue-600 bg-blue-600 text-white"
+                                  : "border-slate-300 bg-white text-transparent"
+                              }`}
+                            >
+                              <CheckCircle2 size={16} />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {form.invitationMode === "all" && (
+              <div className="rounded-xl bg-white p-4 text-sm text-slate-600">
+                This meeting will be visible to all employees and managers.
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 md:flex-row md:justify-end">
+            <button
+              type="button"
+              onClick={resetForm}
+              className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Clear
+            </button>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              <Plus size={16} />
+              {submitting ? "Creating..." : "Create Meeting"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <div className="mb-5 flex flex-col justify-between gap-3 xl:flex-row xl:items-center">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">
+              Meeting History
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Check meeting status, receivers, and joined participants.
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[190px_170px]">
+            <div>
+              <label className="mb-1 flex items-center gap-1 text-xs font-bold uppercase text-slate-500">
+                <CalendarDays size={14} /> Date
+              </label>
+
+              <input
+                type="date"
+                value={meetingDate}
+                onChange={(event) => setMeetingDate(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
                 Status
               </label>
+
               <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                value={meetingStatus}
+                onChange={(event) => setMeetingStatus(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
               >
                 <option value="all">All</option>
                 <option value="scheduled">Scheduled</option>
@@ -355,136 +628,208 @@ const AdminMeetingPanel = () => {
               </select>
             </div>
           </div>
+        </div>
 
-          {meetings.length === 0 ? (
-            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
-              No meetings found for this filter.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {meetings.map((meeting) => (
-                <button
-                  type="button"
-                  key={meeting._id}
-                  onClick={() => setSelectedMeetingId(meeting._id)}
-                  className={`w-full rounded-2xl border p-4 text-left transition ${
-                    selectedMeetingId === meeting._id
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 bg-white hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-gray-900">{meeting.title}</h4>
-                      <p className="mt-1 line-clamp-2 text-xs text-gray-500">
-                        {meeting.description || "No description"}
+        {loadingMeetings ? (
+          <div className="rounded-xl bg-slate-50 p-6 text-sm text-slate-500">
+            Loading meetings...
+          </div>
+        ) : meetings.length === 0 ? (
+          <div className="rounded-xl bg-slate-50 p-6 text-sm text-slate-500">
+            No meetings found for selected filters.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {meetings.map((meeting) => (
+              <div
+                key={meeting._id}
+                className="rounded-2xl border border-slate-200 p-4"
+              >
+                <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-slate-900">
+                        {meeting.title}
+                      </h3>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${
+                          statusClass[meeting.status] ||
+                          "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {meeting.status}
+                      </span>
+
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 capitalize">
+                        {meeting.invitationMode === "selected"
+                          ? "Selected People"
+                          : "Everyone"}
+                      </span>
+                    </div>
+
+                    {meeting.description && (
+                      <p className="mb-3 text-sm text-slate-500">
+                        {meeting.description}
+                      </p>
+                    )}
+
+                    <div className="grid gap-2 text-xs text-slate-500 md:grid-cols-3">
+                      <p>
+                        Created:{" "}
+                        <span className="font-semibold text-slate-700">
+                          {formatDateTime(meeting.createdAt)}
+                        </span>
+                      </p>
+
+                      <p>
+                        Started:{" "}
+                        <span className="font-semibold text-slate-700">
+                          {formatDateTime(meeting.startedAt)}
+                        </span>
+                      </p>
+
+                      <p>
+                        Ended:{" "}
+                        <span className="font-semibold text-slate-700">
+                          {formatDateTime(meeting.endedAt)}
+                        </span>
                       </p>
                     </div>
 
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${statusBadgeClass(
-                        meeting.status
-                      )}`}
-                    >
-                      {meeting.status}
-                    </span>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+                        <Users size={13} />
+                        Invited: {meeting.invitedCount || 0}
+                      </span>
+
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                        <UserCheck size={13} />
+                        Joined: {meeting.participantCount || 0}
+                      </span>
+
+                      {meeting.status === "live" && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-700">
+                          <Clock size={13} />
+                          Live Now
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="mt-3 grid gap-2 text-xs text-gray-500">
-                    <div>Created: {formatDateTime(meeting.createdAt)}</div>
-                    <div>Started: {formatDateTime(meeting.startedAt)}</div>
-                    <div>Ended: {formatDateTime(meeting.endedAt)}</div>
-                    <div>Joined Users: {meeting.participantCount || 0}</div>
+                  <div className="flex flex-wrap gap-2 xl:justify-end">
+                    {meeting.status === "scheduled" && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartMeeting(meeting._id)}
+                        disabled={
+                          Boolean(liveMeeting) ||
+                          actionLoadingId === meeting._id
+                        }
+                        className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        <Play size={15} />
+                        Start
+                      </button>
+                    )}
+
+                    {meeting.status === "live" && (
+                      <button
+                        type="button"
+                        onClick={() => handleEndMeeting(meeting._id)}
+                        disabled={actionLoadingId === meeting._id}
+                        className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                      >
+                        <Square size={15} />
+                        End
+                      </button>
+                    )}
                   </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleStartMeeting(meeting._id);
-                      }}
-                      disabled={
-                        meeting.status === "live" ||
-                        meeting.status === "ended" ||
-                        Boolean(liveMeeting && liveMeeting._id !== meeting._id) ||
-                        actionLoading === `start-${meeting._id}`
-                      }
-                      className="rounded-lg bg-green-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {actionLoading === `start-${meeting._id}` ? "Starting..." : "Start"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleEndMeeting(meeting._id);
-                      }}
-                      disabled={
-                        meeting.status !== "live" ||
-                        actionLoading === `end-${meeting._id}`
-                      }
-                      className="rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {actionLoading === `end-${meeting._id}` ? "Ending..." : "End"}
-                    </button>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-6">
-          {selectedMeeting && (
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900">
-                    {selectedMeeting.title}
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {selectedMeeting.description || "No description added."}
-                  </p>
                 </div>
 
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${statusBadgeClass(
-                    selectedMeeting.status
-                  )}`}
-                >
-                  {selectedMeeting.status}
-                </span>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="mb-3 text-xs font-bold uppercase text-slate-500">
+                      Invited Users
+                    </p>
+
+                    {meeting.invitationMode === "all" ? (
+                      <p className="text-sm text-slate-500">
+                        Everyone can receive this meeting.
+                      </p>
+                    ) : !meeting.invitedUsers?.length ? (
+                      <p className="text-sm text-slate-500">
+                        No invited users.
+                      </p>
+                    ) : (
+                      <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                        {meeting.invitedUsers.map((invitee) => (
+                          <div
+                            key={`${meeting._id}-${invitee.user}`}
+                            className="rounded-lg bg-white p-3"
+                          >
+                            <p className="font-semibold text-slate-900">
+                              {invitee.name}
+                            </p>
+
+                            <p className="text-xs text-slate-500">
+                              {invitee.email}
+                            </p>
+
+                            <p className="text-xs capitalize text-slate-400">
+                              {invitee.role} | Invited:{" "}
+                              {formatDateTime(invitee.invitedAt)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="mb-3 text-xs font-bold uppercase text-slate-500">
+                      Joined Participants
+                    </p>
+
+                    {!meeting.participants?.length ? (
+                      <p className="text-sm text-slate-500">
+                        No one joined yet.
+                      </p>
+                    ) : (
+                      <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                        {meeting.participants.map((participant) => (
+                          <div
+                            key={`${meeting._id}-${participant.user}`}
+                            className="rounded-lg bg-white p-3"
+                          >
+                            <p className="font-semibold text-slate-900">
+                              {participant.name}
+                            </p>
+
+                            <p className="text-xs text-slate-500">
+                              {participant.email}
+                            </p>
+
+                            <p className="text-xs capitalize text-slate-400">
+                              {participant.role} | First joined:{" "}
+                              {formatDateTime(participant.joinedAt)}
+                            </p>
+
+                            <p className="text-xs text-slate-400">
+                              Last joined:{" "}
+                              {formatDateTime(participant.lastJoinedAt)} | Count:{" "}
+                              {participant.joinCount || 1}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-
-              <div className="grid gap-3 text-sm text-gray-600 md:grid-cols-2">
-                <div className="rounded-xl bg-gray-50 p-3">
-                  <span className="block text-xs font-bold uppercase text-gray-400">
-                    Started At
-                  </span>
-                  {formatDateTime(selectedMeeting.startedAt)}
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-3">
-                  <span className="block text-xs font-bold uppercase text-gray-400">
-                    Ended At
-                  </span>
-                  {formatDateTime(selectedMeeting.endedAt)}
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-3 md:col-span-2">
-                  <span className="block text-xs font-bold uppercase text-gray-400">
-                    Meeting Link
-                  </span>
-                  <span className="break-all">{selectedMeeting.meetingUrl}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <MeetingJoinReport meeting={selectedMeeting} />
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -44,6 +44,40 @@ const meetingParticipantSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const meetingInviteeSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    email: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    role: {
+      type: String,
+      enum: ["manager", "employee"],
+      required: true,
+    },
+
+    invitedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const meetingSchema = new mongoose.Schema(
   {
     title: {
@@ -65,6 +99,15 @@ const meetingSchema = new mongoose.Schema(
       required: [true, "Meeting link is required"],
       trim: true,
     },
+
+    invitationMode: {
+      type: String,
+      enum: ["all", "selected"],
+      default: "all",
+      index: true,
+    },
+
+    invitedUsers: [meetingInviteeSchema],
 
     status: {
       type: String,
@@ -97,5 +140,7 @@ const meetingSchema = new mongoose.Schema(
 meetingSchema.index({ status: 1, createdAt: -1 });
 meetingSchema.index({ startedAt: -1 });
 meetingSchema.index({ "participants.user": 1 });
+meetingSchema.index({ "invitedUsers.user": 1 });
+meetingSchema.index({ invitationMode: 1, status: 1 });
 
 module.exports = mongoose.model("Meeting", meetingSchema);

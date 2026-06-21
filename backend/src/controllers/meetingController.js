@@ -1,6 +1,8 @@
 const Meeting = require("../models/Meeting");
+const User = require("../models/User");
 
 const ALLOWED_ROLES = ["admin", "manager", "employee"];
+const INVITABLE_ROLES = ["manager", "employee"];
 
 const sendError = (res, statusCode, message) => {
   return res.status(statusCode).json({
@@ -21,7 +23,9 @@ const getCurrentUserId = (req) => {
 const getCurrentUserName = (user) => {
   if (!user) return "Unknown User";
 
-  const combinedName = [user.firstName, user.lastName].filter(Boolean).join(" ");
+  const combinedName = [user.firstName, user.lastName]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     user.name ||
@@ -42,12 +46,60 @@ const isValidMeetingUrl = (url) => {
   }
 };
 
-const emitSocketEvent = (req, eventName, payload) => {
+const emitToEveryone = (req, eventName, payload) => {
   const io = req.app.get("io");
 
   if (io) {
     io.emit(eventName, payload);
   }
+};
+
+const emitToAdminsAndInvitees = (req, eventName, payload, inviteeIds = []) => {
+  const io = req.app.get("io");
+
+  if (!io) return;
+
+  io.to("admins").emit(eventName, payload);
+
+  inviteeIds.forEach((userId) => {
+    io.to(`user:${userId}`).emit(eventName, payload);
+  });
+};
+
+const getMeetingInviteeIds = (meeting) => {
+  if (!meeting || meeting.invitationMode !== "selected") return [];
+
+  return (meeting.invitedUsers || [])
+    .map((invitee) => getIdString(invitee.user))
+    .filter(Boolean);
+};
+
+const isUserInvitedToMeeting = (meeting, userId) => {
+  if (!meeting || !userId) return false;
+
+  if (meeting.invitationMode !== "selected") {
+    return true;
+  }
+
+  const currentUserId = String(userId);
+
+  return (meeting.invitedUsers || []).some(
+    (invitee) => getIdString(invitee.user) === currentUserId
+  );
+};
+
+const canUserAccessMeeting = (meeting, user) => {
+  if (!meeting || !user) return false;
+
+  const userId = getIdString(user._id || user.id);
+
+  if (user.role === "admin") return true;
+
+  if (getIdString(meeting.createdBy) === userId) {
+    return true;
+  }
+
+  return isUserInvitedToMeeting(meeting, userId);
 };
 
 const toParticipantResponse = (participant) => {
@@ -62,26 +114,50 @@ const toParticipantResponse = (participant) => {
   };
 };
 
+const toInviteeResponse = (invitee) => {
+  return {
+    user: getIdString(invitee.user),
+    name: invitee.name,
+    email: invitee.email,
+    role: invitee.role,
+    invitedAt: invitee.invitedAt,
+  };
+};
+
 const toPublicMeetingResponse = (meeting, currentUserId = null) => {
   if (!meeting) return null;
 
   const userId = currentUserId ? String(currentUserId) : null;
 
   const currentUserJoined = userId
-    ? meeting.participants?.some((p) => getIdString(p.user) === userId)
+    ? meeting.participants?.some((participant) => {
+        return getIdString(participant.user) === userId;
+      })
+    : false;
+
+  const currentUserInvited = userId
+    ? isUserInvitedToMeeting(meeting, userId)
     : false;
 
   return {
     _id: meeting._id,
     title: meeting.title,
     description: meeting.description,
+
+    // Important: meetingUrl is intentionally hidden here.
+    // User receives the real URL only after joinMeeting validates access.
+    invitationMode: meeting.invitationMode || "all",
+    invitedCount: meeting.invitedUsers?.length || 0,
+
     status: meeting.status,
     startedAt: meeting.startedAt,
     endedAt: meeting.endedAt,
     createdAt: meeting.createdAt,
     updatedAt: meeting.updatedAt,
+
     participantCount: meeting.participants?.length || 0,
     currentUserJoined,
+    currentUserInvited,
   };
 };
 
@@ -102,15 +178,38 @@ const toAdminMeetingResponse = (meeting) => {
     title: meeting.title,
     description: meeting.description,
     meetingUrl: meeting.meetingUrl,
+
+    invitationMode: meeting.invitationMode || "all",
+    invitedCount: meeting.invitedUsers?.length || 0,
+    invitedUsers: meeting.invitedUsers?.map(toInviteeResponse) || [],
+
     status: meeting.status,
     createdBy,
     startedAt: meeting.startedAt,
     endedAt: meeting.endedAt,
     createdAt: meeting.createdAt,
     updatedAt: meeting.updatedAt,
+
     participantCount: meeting.participants?.length || 0,
     participants: meeting.participants?.map(toParticipantResponse) || [],
   };
+};
+
+const emitMeetingEvent = (req, eventName, meeting, payload) => {
+  const responsePayload = payload || toPublicMeetingResponse(meeting);
+
+  if (meeting?.invitationMode === "selected") {
+    emitToAdminsAndInvitees(
+      req,
+      eventName,
+      responsePayload,
+      getMeetingInviteeIds(meeting)
+    );
+
+    return;
+  }
+
+  emitToEveryone(req, eventName, responsePayload);
 };
 
 const getSriLankaDateRange = (dateString) => {
@@ -120,6 +219,112 @@ const getSriLankaDateRange = (dateString) => {
   return { start, end };
 };
 
+const normalizeInvitedUsers = (value) => {
+  const rawList = Array.isArray(value) ? value : value ? [value] : [];
+
+  const cleaned = rawList
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  return [...new Set(cleaned)];
+};
+
+const buildInvitees = async (invitedUserIds) => {
+  if (!invitedUserIds.length) {
+    return {
+      valid: true,
+      message: "",
+      invitees: [],
+    };
+  }
+
+  const users = await User.find({
+    _id: { $in: invitedUserIds },
+    role: { $in: INVITABLE_ROLES },
+    accountStatus: "active",
+  }).select(
+    "name fullName firstName lastName username email role department position accountStatus"
+  );
+
+  if (users.length !== invitedUserIds.length) {
+    return {
+      valid: false,
+      message: "One or more selected users were not found or are inactive",
+      invitees: [],
+    };
+  }
+
+  return {
+    valid: true,
+    message: "",
+    invitees: users.map((user) => ({
+      user: user._id,
+      name: getCurrentUserName(user),
+      email: user.email || "",
+      role: user.role,
+      invitedAt: new Date(),
+    })),
+  };
+};
+
+// @desc    Get users that can receive selected meetings
+// @route   GET /api/meetings/invite-users?search=&role=all
+// @access  Admin
+exports.getMeetingInviteUsers = async (req, res) => {
+  try {
+    const { search = "", role = "all" } = req.query;
+
+    const filter = {
+      role: { $in: INVITABLE_ROLES },
+      accountStatus: "active",
+    };
+
+    if (role && role !== "all") {
+      if (!INVITABLE_ROLES.includes(role)) {
+        return sendError(res, 400, "Invalid role filter");
+      }
+
+      filter.role = role;
+    }
+
+    if (search.trim()) {
+      const regex = new RegExp(search.trim(), "i");
+
+      filter.$or = [
+        { name: regex },
+        { fullName: regex },
+        { firstName: regex },
+        { lastName: regex },
+        { username: regex },
+        { email: regex },
+        { role: regex },
+        { department: regex },
+        { position: regex },
+      ];
+    }
+
+    const users = await User.find(filter)
+      .select(
+        "name fullName firstName lastName username email role department position accountStatus"
+      )
+      .sort({
+        role: 1,
+        name: 1,
+        email: 1,
+      });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    console.error("Get meeting invite users error:", error);
+
+    return sendError(res, 500, "Failed to load users");
+  }
+};
+
 // @desc    Create meeting
 // @route   POST /api/meetings
 // @access  Admin
@@ -127,7 +332,13 @@ exports.createMeeting = async (req, res) => {
   try {
     const userId = getCurrentUserId(req);
 
-    const { title, description, meetingUrl } = req.body;
+    const {
+      title,
+      description,
+      meetingUrl,
+      invitationMode = "selected",
+      invitedUsers,
+    } = req.body;
 
     if (!userId) {
       return sendError(res, 401, "Unauthorized user");
@@ -145,10 +356,35 @@ exports.createMeeting = async (req, res) => {
       return sendError(res, 400, "Please enter a valid meeting link");
     }
 
+    const mode = invitationMode === "all" ? "all" : "selected";
+    const invitedUserIds = normalizeInvitedUsers(invitedUsers);
+
+    let invitees = [];
+
+    if (mode === "selected") {
+      if (!invitedUserIds.length) {
+        return sendError(
+          res,
+          400,
+          "Please select at least one meeting receiver"
+        );
+      }
+
+      const result = await buildInvitees(invitedUserIds);
+
+      if (!result.valid) {
+        return sendError(res, 400, result.message);
+      }
+
+      invitees = result.invitees;
+    }
+
     const meeting = await Meeting.create({
       title: title.trim(),
       description: description?.trim() || "",
       meetingUrl: meetingUrl.trim(),
+      invitationMode: mode,
+      invitedUsers: invitees,
       createdBy: userId,
       status: "scheduled",
     });
@@ -158,33 +394,54 @@ exports.createMeeting = async (req, res) => {
       "name fullName firstName lastName username email role"
     );
 
-    emitSocketEvent(req, "meetingCreated", toPublicMeetingResponse(fullMeeting));
+    emitMeetingEvent(req, "meetingCreated", fullMeeting);
 
     return res.status(201).json({
       success: true,
-      message: "Meeting created successfully",
+      message:
+        mode === "selected"
+          ? "Meeting created for selected people successfully"
+          : "Meeting created for everyone successfully",
       meeting: toAdminMeetingResponse(fullMeeting),
     });
   } catch (error) {
     console.error("Create meeting error:", error);
+
     return sendError(res, 500, "Failed to create meeting");
   }
 };
 
-// @desc    Get current scheduled/live meeting for users
+// @desc    Get current scheduled/live meeting for invited users
 // @route   GET /api/meetings/active
 // @access  Admin, Manager, Employee
 exports.getActiveMeeting = async (req, res) => {
   try {
     const userId = getCurrentUserId(req);
 
-    let meeting = await Meeting.findOne({ status: "live" }).sort({
+    const accessFilter =
+      req.user?.role === "admin"
+        ? {}
+        : {
+            $or: [
+              { invitationMode: "all" },
+              { "invitedUsers.user": userId },
+              { createdBy: userId },
+            ],
+          };
+
+    let meeting = await Meeting.findOne({
+      status: "live",
+      ...accessFilter,
+    }).sort({
       startedAt: -1,
       createdAt: -1,
     });
 
     if (!meeting) {
-      meeting = await Meeting.findOne({ status: "scheduled" }).sort({
+      meeting = await Meeting.findOne({
+        status: "scheduled",
+        ...accessFilter,
+      }).sort({
         createdAt: -1,
       });
     }
@@ -195,6 +452,7 @@ exports.getActiveMeeting = async (req, res) => {
     });
   } catch (error) {
     console.error("Get active meeting error:", error);
+
     return sendError(res, 500, "Failed to load active meeting");
   }
 };
@@ -225,11 +483,15 @@ exports.getAdminMeetings = async (req, res) => {
         { endedAt: { $gte: start, $lte: end } },
         { "participants.joinedAt": { $gte: start, $lte: end } },
         { "participants.lastJoinedAt": { $gte: start, $lte: end } },
+        { "invitedUsers.invitedAt": { $gte: start, $lte: end } },
       ];
     }
 
     const meetings = await Meeting.find(filter)
-      .populate("createdBy", "name fullName firstName lastName username email role")
+      .populate(
+        "createdBy",
+        "name fullName firstName lastName username email role"
+      )
       .sort({ createdAt: -1 });
 
     return res.status(200).json({
@@ -239,6 +501,7 @@ exports.getAdminMeetings = async (req, res) => {
     });
   } catch (error) {
     console.error("Get admin meetings error:", error);
+
     return sendError(res, 500, "Failed to load meetings");
   }
 };
@@ -263,6 +526,7 @@ exports.getMeetingById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get meeting by id error:", error);
+
     return sendError(res, 500, "Failed to load meeting");
   }
 };
@@ -306,19 +570,19 @@ exports.startMeeting = async (req, res) => {
       "name fullName firstName lastName username email role"
     );
 
-    emitSocketEvent(
-      req,
-      "meetingStarted",
-      toPublicMeetingResponse(updatedMeeting)
-    );
+    emitMeetingEvent(req, "meetingStarted", updatedMeeting);
 
     return res.status(200).json({
       success: true,
-      message: "Meeting started successfully",
+      message:
+        updatedMeeting.invitationMode === "selected"
+          ? "Meeting started for selected people"
+          : "Meeting started successfully",
       meeting: toAdminMeetingResponse(updatedMeeting),
     });
   } catch (error) {
     console.error("Start meeting error:", error);
+
     return sendError(res, 500, "Failed to start meeting");
   }
 };
@@ -352,7 +616,7 @@ exports.endMeeting = async (req, res) => {
       "name fullName firstName lastName username email role"
     );
 
-    emitSocketEvent(req, "meetingEnded", {
+    emitMeetingEvent(req, "meetingEnded", updatedMeeting, {
       _id: updatedMeeting._id,
       status: updatedMeeting.status,
       endedAt: updatedMeeting.endedAt,
@@ -365,6 +629,7 @@ exports.endMeeting = async (req, res) => {
     });
   } catch (error) {
     console.error("End meeting error:", error);
+
     return sendError(res, 500, "Failed to end meeting");
   }
 };
@@ -391,6 +656,10 @@ exports.joinMeeting = async (req, res) => {
       return sendError(res, 404, "Meeting not found");
     }
 
+    if (!canUserAccessMeeting(meeting, user)) {
+      return sendError(res, 403, "This meeting is not assigned to you");
+    }
+
     if (meeting.status !== "live") {
       return sendError(res, 400, "Meeting is not live now");
     }
@@ -398,9 +667,9 @@ exports.joinMeeting = async (req, res) => {
     const now = new Date();
     const userIdString = String(userId);
 
-    const existingParticipant = meeting.participants.find(
-      (participant) => getIdString(participant.user) === userIdString
-    );
+    const existingParticipant = meeting.participants.find((participant) => {
+      return getIdString(participant.user) === userIdString;
+    });
 
     let savedParticipant;
 
@@ -427,7 +696,7 @@ exports.joinMeeting = async (req, res) => {
 
     const participantResponse = toParticipantResponse(savedParticipant);
 
-    emitSocketEvent(req, "meetingUserJoined", {
+    emitMeetingEvent(req, "meetingUserJoined", meeting, {
       meetingId: meeting._id,
       participant: participantResponse,
     });
@@ -440,6 +709,7 @@ exports.joinMeeting = async (req, res) => {
     });
   } catch (error) {
     console.error("Join meeting error:", error);
+
     return sendError(res, 500, "Failed to join meeting");
   }
 };

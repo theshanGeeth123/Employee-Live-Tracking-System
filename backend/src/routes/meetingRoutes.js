@@ -1,6 +1,7 @@
 const express = require("express");
 
 const {
+  getMeetingInviteUsers,
   createMeeting,
   getActiveMeeting,
   getAdminMeetings,
@@ -36,9 +37,19 @@ const requireRoles = (...roles) => {
 
 router.use(protect);
 
-router.get("/active", requireRoles("admin", "manager", "employee"), getActiveMeeting);
-router.post("/:id/join", requireRoles("admin", "manager", "employee"), joinMeeting);
+router.get(
+  "/active",
+  requireRoles("admin", "manager", "employee"),
+  getActiveMeeting
+);
 
+router.post(
+  "/:id/join",
+  requireRoles("admin", "manager", "employee"),
+  joinMeeting
+);
+
+router.get("/invite-users", requireRoles("admin"), getMeetingInviteUsers);
 router.post("/", requireRoles("admin"), createMeeting);
 router.get("/admin", requireRoles("admin"), getAdminMeetings);
 router.get("/:id", requireRoles("admin"), getMeetingById);
