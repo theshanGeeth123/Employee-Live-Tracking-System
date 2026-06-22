@@ -19,7 +19,9 @@ const userSchema = new mongoose.Schema(
 
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: function () {
+        return this.authProvider === "local";
+      },
       minlength: [6, "Password must be at least 6 characters"],
       select: false,
     },
@@ -47,11 +49,55 @@ const userSchema = new mongoose.Schema(
 
     accountStatus: {
       type: String,
-      enum: ["active", "suspended", "resigned"],
+      enum: ["active", "suspended", "resigned", "deleted"],
       default: "active",
     },
 
-    // Future live tracking fields
+    authProvider: {
+      type: String,
+      enum: ["local", "google", "both"],
+      default: "local",
+    },
+
+    googleId: {
+      type: String,
+      default: "",
+      select: false,
+    },
+
+    avatar: {
+      type: String,
+      default: "",
+    },
+
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    resetPasswordToken: {
+      type: String,
+      default: "",
+      select: false,
+    },
+
+    resetPasswordExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
     presenceStatus: {
       type: String,
       enum: ["online", "offline", "idle", "on_break"],
@@ -71,9 +117,12 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Hash password before save
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) {
+    return;
+  }
+
+  if (!this.password) {
     return;
   }
 
@@ -81,9 +130,12 @@ userSchema.pre("save", async function () {
   this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Compare password
 userSchema.methods.matchPassword = async function (enteredPassword) {
+  if (!this.password) {
+    return false;
+  }
+
   return await bcrypt.compare(enteredPassword, this.password);
-}
+};
 
 module.exports = mongoose.model("User", userSchema);

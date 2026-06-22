@@ -1,139 +1,121 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import API from "../api/axios";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  getMe,
+  googleLoginUser,
+  loginUser,
+  logoutUser,
+  registerUser,
+} from "../api/authApi";
 
 const AuthContext = createContext(null);
 
-const getSavedUser = () => {
+const getStoredUser = () => {
   try {
-    const savedUser = localStorage.getItem("user");
-
-    if (!savedUser || savedUser === "undefined" || savedUser === "null") {
-      localStorage.removeItem("user");
-      return null;
-    }
-
-    return JSON.parse(savedUser);
-  } catch (error) {
-    localStorage.removeItem("user");
+    const value = localStorage.getItem("user");
+    return value ? JSON.parse(value) : null;
+  } catch {
     return null;
   }
-};
-
-const getSavedToken = () => {
-  const savedToken = localStorage.getItem("token");
-
-  if (!savedToken || savedToken === "undefined" || savedToken === "null") {
-    localStorage.removeItem("token");
-    return null;
-  }
-
-  return savedToken;
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => getSavedUser());
-  const [token, setToken] = useState(() => getSavedToken());
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(getStoredUser);
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+  const [loading, setLoading] = useState(Boolean(localStorage.getItem("token")));
 
-  const saveAuthData = (newToken, newUser) => {
-    if (!newToken || !newUser) {
-      throw new Error("Invalid login response");
+  const saveAuth = useCallback((data) => {
+    if (data?.token) {
+      localStorage.setItem("token", data.token);
+      setToken(data.token);
     }
 
-    localStorage.setItem("token", newToken);
-    localStorage.setItem("user", JSON.stringify(newUser));
-
-    setToken(newToken);
-    setUser(newUser);
-  };
+    if (data?.user) {
+      localStorage.setItem("user", JSON.stringify(data.user));
+      setUser(data.user);
+    }
+  }, []);
 
   const login = async ({ email, password }) => {
-    const response = await API.post("/auth/login", {
-      email,
-      password,
-    });
-
-    const responseToken = response.data.token;
-    const responseUser = response.data.user;
-
-    saveAuthData(responseToken, responseUser);
-
-    return responseUser;
+    const data = await loginUser({ email, password });
+    saveAuth(data);
+    return data;
   };
 
-  const register = async (formData) => {
-    const response = await API.post("/auth/register", formData);
-
-    const responseToken = response.data.token;
-    const responseUser = response.data.user;
-
-    saveAuthData(responseToken, responseUser);
-
-    return responseUser;
+  const register = async (payload) => {
+    const data = await registerUser(payload);
+    saveAuth(data);
+    return data;
   };
 
-  const logout = async () => {
-    try {
-      await API.post("/auth/logout");
-    } catch (error) {
-      console.log("Logout API failed:", error.message);
+  const loginWithGoogle = async (credential) => {
+    const data = await googleLoginUser(credential);
+    saveAuth(data);
+    return data;
+  };
+
+  const refreshUser = useCallback(async () => {
+    if (!localStorage.getItem("token")) {
+      setLoading(false);
+      return;
     }
 
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-
-    setToken(null);
-    setUser(null);
-  };
-
-  const fetchMe = async () => {
     try {
-      const savedToken = getSavedToken();
+      const data = await getMe();
 
-      if (!savedToken) {
-        setLoading(false);
-        return;
+      if (data?.user) {
+        localStorage.setItem("user", JSON.stringify(data.user));
+        setUser(data.user);
       }
-
-      const response = await API.get("/auth/me");
-
-      if (!response.data.user) {
-        throw new Error("Invalid user response");
-      }
-
-      setUser(response.data.user);
-      setToken(savedToken);
-      localStorage.setItem("user", JSON.stringify(response.data.user));
-    } catch (error) {
+    } catch {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-
-      setToken(null);
+      setToken("");
       setUser(null);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const logout = async () => {
+    try {
+      await logoutUser();
+    } catch {
+      // Ignore backend logout error
+    }
+
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setToken("");
+    setUser(null);
   };
 
   useEffect(() => {
-    fetchMe();
-  }, []);
+    refreshUser();
+  }, [refreshUser]);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        loading,
-        login,
-        register,
-        logout,
-        isAuthenticated: Boolean(user && token),
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      token,
+      loading,
+      isAuthenticated: Boolean(user && token),
+      login,
+      register,
+      loginWithGoogle,
+      refreshUser,
+      logout,
+    }),
+    [user, token, loading, refreshUser]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
