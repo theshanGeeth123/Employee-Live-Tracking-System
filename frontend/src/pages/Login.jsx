@@ -23,6 +23,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -37,6 +38,7 @@ const Login = () => {
     event.preventDefault();
 
     setError("");
+    setSuccess("");
 
     if (!form.email.trim() || !form.password) {
       setError("Email and password are required");
@@ -51,6 +53,11 @@ const Login = () => {
         password: form.password,
       });
 
+      if (data.pendingApproval) {
+        setSuccess(data.message || "Your account is waiting for admin approval.");
+        return;
+      }
+
       navigate(getDashboardPath(data.user?.role), { replace: true });
     } catch (error) {
       setError(
@@ -63,6 +70,7 @@ const Login = () => {
 
   const handleGoogleSuccess = async (credentialResponse) => {
     setError("");
+    setSuccess("");
 
     if (!credentialResponse?.credential) {
       setError("Google login failed. Credential not found.");
@@ -73,6 +81,11 @@ const Login = () => {
       setGoogleLoading(true);
 
       const data = await loginWithGoogle(credentialResponse.credential);
+
+      if (data.pendingApproval) {
+        setSuccess(data.message || "Your account is waiting for admin approval.");
+        return;
+      }
 
       navigate(getDashboardPath(data.user?.role), { replace: true });
     } catch (error) {
@@ -90,14 +103,17 @@ const Login = () => {
     <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-8">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm">
         <div className="mb-6 text-center">
-          <h1 className="text-2xl font-bold text-slate-900">
-            Welcome Back
-          </h1>
-
+          <h1 className="text-2xl font-bold text-slate-900">Welcome Back</h1>
           <p className="mt-2 text-sm text-slate-500">
             Login to Employee Live Tracking System
           </p>
         </div>
+
+        {success && (
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {success}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

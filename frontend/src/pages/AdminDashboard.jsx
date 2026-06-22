@@ -10,8 +10,10 @@ import {
   Coffee,
   Video,
   ClipboardCheck,
-  BarChart3 ,
+  BarChart3,
 } from "lucide-react";
+import { UserCheck } from "lucide-react";
+import AdminUserControlPanel from "../components/AdminUserControlPanel";
 
 import AdminBreakReport from "../components/AdminBreakReport";
 import AdminMeetingPanel from "../components/AdminMeetingPanel";
@@ -70,6 +72,11 @@ const AdminDashboard = () => {
       key: "meetings",
       label: "Meetings",
       icon: Video,
+    },
+    {
+      key: "userControl",
+      label: "User Control",
+      icon: UserCheck,
     },
     {
       key: "tasks",
@@ -135,6 +142,10 @@ const AdminDashboard = () => {
     }
     if (activeSection === "activityReports") {
       return <ActivityReportsPanel />;
+    }
+
+    if (activeSection === "userControl") {
+      return <AdminUserControlPanel />;
     }
 
     return <DailyAttendanceReport />;

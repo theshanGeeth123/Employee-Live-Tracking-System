@@ -49,8 +49,8 @@ const userSchema = new mongoose.Schema(
 
     accountStatus: {
       type: String,
-      enum: ["active", "suspended", "resigned", "deleted"],
-      default: "active",
+      enum: ["pending", "active", "suspended", "resigned", "deleted"],
+      default: "pending",
     },
 
     authProvider: {
@@ -93,6 +93,17 @@ const userSchema = new mongoose.Schema(
     },
 
     deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,

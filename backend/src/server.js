@@ -25,6 +25,7 @@ const meetingRoutes = require("./routes/meetingRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const attendanceAdvancedRoutes = require("./routes/attendanceAdvancedRoutes");
 const activityReportRoutes = require("./routes/activityReportRoutes");
+const adminUserControlRoutes = require("./routes/adminUserControlRoutes");
 
 const setupPresenceSocket = require("./socket/presenceSocket");
 
@@ -93,6 +94,8 @@ app.use("/api/meetings", meetingRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/attendance-advanced", attendanceAdvancedRoutes);
 app.use("/api/activity-reports", activityReportRoutes);
+app.use("/api/admin/user-control", adminUserControlRoutes);
+
 
 // 404 route
 app.use((req, res) => {

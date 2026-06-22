@@ -22,7 +22,25 @@ const getUserResponse = (user) => ({
   avatar: user.avatar,
   emailVerified: user.emailVerified,
   lastLoginAt: user.lastLoginAt,
+  approvedAt: user.approvedAt,
+  createdAt: user.createdAt,
 });
+
+const getInactiveAccountMessage = (accountStatus) => {
+  if (accountStatus === "pending") {
+    return "Your account is waiting for admin approval.";
+  }
+
+  if (accountStatus === "suspended") {
+    return "Your account has been suspended. Please contact admin.";
+  }
+
+  if (accountStatus === "resigned") {
+    return "Your account has been marked as resigned. Please contact admin.";
+  }
+
+  return "Your account is not active. Please contact admin.";
+};
 
 const sendAuthResponse = (res, user, message) => {
   const token = generateToken(user._id);
@@ -31,6 +49,16 @@ const sendAuthResponse = (res, user, message) => {
     success: true,
     message,
     token,
+    user: getUserResponse(user),
+  });
+};
+
+const sendPendingApprovalResponse = (res, user, message, statusCode = 200) => {
+  return res.status(statusCode).json({
+    success: true,
+    pendingApproval: true,
+    accountStatus: "pending",
+    message,
     user: getUserResponse(user),
   });
 };
@@ -49,9 +77,11 @@ const registerEmployee = async (req, res) => {
       });
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const normalizedEmail = email.trim().toLowerCase();
 
-    if (existingUser) {
+    const existingUser = await User.findOne({ email: normalizedEmail });
+
+    if (existingUser && existingUser.accountStatus !== "deleted") {
       return res.status(400).json({
         success: false,
         message: "User already exists with this email",
@@ -59,25 +89,24 @@ const registerEmployee = async (req, res) => {
     }
 
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: normalizedEmail,
       password,
-      phone,
-      department,
-      position,
+      phone: phone || "",
+      department: department || "",
+      position: position || "",
       role: "employee",
       authProvider: "local",
       emailVerified: false,
+      accountStatus: "pending",
     });
 
-    const token = generateToken(user._id);
-
-    return res.status(201).json({
-      success: true,
-      message: "Employee registered successfully",
-      token,
-      user: getUserResponse(user),
-    });
+    return sendPendingApprovalResponse(
+      res,
+      user,
+      "Registration successful. Your account is waiting for admin approval.",
+      201
+    );
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -101,7 +130,9 @@ const loginUser = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select(
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await User.findOne({ email: normalizedEmail }).select(
       "+password"
     );
 
@@ -115,7 +146,8 @@ const loginUser = async (req, res) => {
     if (user.accountStatus !== "active") {
       return res.status(403).json({
         success: false,
-        message: "Your account is not active. Please contact admin.",
+        accountStatus: user.accountStatus,
+        message: getInactiveAccountMessage(user.accountStatus),
       });
     }
 
@@ -141,7 +173,7 @@ const loginUser = async (req, res) => {
   }
 };
 
-// @desc    Google login
+// @desc    Google login/register
 // @route   POST /api/auth/google
 // @access  Public
 const googleLogin = async (req, res) => {
@@ -152,6 +184,13 @@ const googleLogin = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Google credential is required",
+      });
+    }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({
+        success: false,
+        message: "Google client ID is not configured",
       });
     }
 
@@ -176,21 +215,15 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    const email = payload.email.toLowerCase();
+    const email = payload.email.trim().toLowerCase();
 
     let user = await User.findOne({ email }).select("+googleId");
 
     if (user && user.accountStatus === "deleted") {
       return res.status(403).json({
         success: false,
+        accountStatus: "deleted",
         message: "This account was removed. Please contact admin.",
-      });
-    }
-
-    if (user && user.accountStatus !== "active") {
-      return res.status(403).json({
-        success: false,
-        message: "Your account is not active. Please contact admin.",
       });
     }
 
@@ -203,18 +236,41 @@ const googleLogin = async (req, res) => {
         googleId: payload.sub,
         avatar: payload.picture || "",
         emailVerified: true,
+        accountStatus: "pending",
       });
-    } else {
-      user.googleId = user.googleId || payload.sub;
-      user.avatar = user.avatar || payload.picture || "";
-      user.emailVerified = true;
 
-      if (user.authProvider === "local") {
-        user.authProvider = "both";
-      }
+      return sendPendingApprovalResponse(
+        res,
+        user,
+        "Google registration successful. Your account is waiting for admin approval.",
+        201
+      );
+    }
 
-      user.lastLoginAt = new Date();
-      await user.save();
+    user.googleId = user.googleId || payload.sub;
+    user.avatar = payload.picture || user.avatar || "";
+    user.emailVerified = true;
+
+    if (user.authProvider === "local") {
+      user.authProvider = "both";
+    }
+
+    await user.save();
+
+    if (user.accountStatus === "pending") {
+      return sendPendingApprovalResponse(
+        res,
+        user,
+        "Your account is waiting for admin approval."
+      );
+    }
+
+    if (user.accountStatus !== "active") {
+      return res.status(403).json({
+        success: false,
+        accountStatus: user.accountStatus,
+        message: getInactiveAccountMessage(user.accountStatus),
+      });
     }
 
     user.lastLoginAt = new Date();
@@ -244,24 +300,25 @@ const forgotPassword = async (req, res) => {
       });
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const user = await User.findOne({
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       accountStatus: { $ne: "deleted" },
     }).select("+resetPasswordToken +resetPasswordExpires");
 
-    // Do not reveal whether email exists
     if (!user) {
       return res.status(200).json({
         success: true,
-        message:
-          "If this email exists, a password reset link has been sent.",
+        message: "If this email exists, a password reset link has been sent.",
       });
     }
 
     if (user.accountStatus !== "active") {
       return res.status(403).json({
         success: false,
-        message: "Your account is not active. Please contact admin.",
+        accountStatus: user.accountStatus,
+        message: getInactiveAccountMessage(user.accountStatus),
       });
     }
 
@@ -288,8 +345,7 @@ const forgotPassword = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        "If this email exists, a password reset link has been sent.",
+      message: "If this email exists, a password reset link has been sent.",
     });
   } catch (error) {
     return res.status(500).json({
